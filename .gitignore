@@ -2,3 +2,7 @@
 !README.md
 .DS_Store
 
+# C++ build directories
+engine/build/
+engine/cmake-build-debug/
+engine/cmake-build-release/
