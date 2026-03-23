@@ -1,10 +1,9 @@
 #pragma once
 
-#include <memory>
+#include <optional>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
-#include <utility>
 
 #include "orderbook.hpp"
 
@@ -16,17 +15,23 @@ class Exchange {
  public:
   Exchange();
 
-  void add_book(std::string symbol) {
-    if (symbol_map.contains(symbol)) {
-      return;
-    }
+  /**
+   * @brief If symbol doesn't already exist, method creates new orderbook and
+   * add it's unique ptr to global symbol_map
+   * @param symbol to be added
+   */
+  void add_book(std::string symbol);
 
-    std::unique_ptr<OrderBook> uniq_ptr = std::make_unique<OrderBook>();
-    symbol_map.emplace(symbol, std::move(uniq_ptr));
-  }
+  /**
+   * @brief Removes the entry for the symbol in symbol_map as well as the
+   * corresponding orderbook.
+   * @param symbol to be removed
+   */
+  void remove_book(std::string symbol);
 
-  
-
-
-
+  /**
+   * @brief Returns corresponding orderbook if it exists for symbol.
+   * @param symbol for which the corresponding orderbook will be retrived for
+   */
+  std::optional<OrderBook*> get_book(std::string symbol) {};
 };
