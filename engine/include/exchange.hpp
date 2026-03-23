@@ -1,11 +1,10 @@
 #pragma once
 
-#include <optional>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
 
-#include "orderbook.hpp"
+#include "../include/orderbook.hpp"
 
 class Exchange {
  private:
@@ -28,3 +27,4 @@ class Exchange {
    * @param symbol to be removed
    */
   void remove_book(std::string symbol);
+};

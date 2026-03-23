@@ -1,3 +1,4 @@
+#include <memory>
 #include <mutex>
 #include <shared_mutex>
 #include <string>
@@ -7,19 +8,16 @@
 Exchange::Exchange() {}
 
 void Exchange::add_book(std::string symbol) {
-  std::unique_lock<std::shared_mutex> lock(std::mutex);
+  std::unique_lock<std::shared_mutex> lock(mutex_);
   if (symbol_map.contains(symbol)) {
-    std::unique_lock<std::shared_mutex> unlock(std::mutex);
     return;
   }
 
   symbol_map.emplace(symbol, std::make_unique<OrderBook>());
-  std::unique_lock<std::shared_mutex> unlock(std::mutex);
 }
 
 void Exchange::remove_book(std::string symbol) {
-  std::unique_lock<std::shared_mutex> lock(std::mutex);
+  std::unique_lock<std::shared_mutex> lock(mutex_);
   symbol_map.erase(symbol);
-  std::unique_lock<std::shared_mutex> unlock(std::mutex);
   return;
 }
