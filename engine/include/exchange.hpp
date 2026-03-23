@@ -28,10 +28,3 @@ class Exchange {
    * @param symbol to be removed
    */
   void remove_book(std::string symbol);
-
-  /**
-   * @brief Returns corresponding orderbook if it exists for symbol.
-   * @param symbol for which the corresponding orderbook will be retrived for
-   */
-  std::optional<OrderBook*> get_book(std::string symbol) {};
-};
