@@ -6,3 +6,4 @@
 engine/build/
 engine/cmake-build-debug/
 engine/cmake-build-release/
+engine/.idea
