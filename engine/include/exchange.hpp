@@ -4,6 +4,7 @@
 #include <string>
 #include <unordered_map>
 
+#include "../include/order.hpp"
 #include "../include/orderbook.hpp"
 
 class Exchange {
@@ -27,4 +28,6 @@ class Exchange {
    * @param symbol to be removed
    */
   void remove_book(std::string symbol);
+
+  bool add_order(std::string symbol, Order Order);
 };

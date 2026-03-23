@@ -21,3 +21,15 @@ void Exchange::remove_book(std::string symbol) {
   symbol_map.erase(symbol);
   return;
 }
+
+bool Exchange::add_order(std::string symbol, Order order) {
+  std::shared_lock<std::shared_mutex> lock(mutex_);
+  auto orderbook = symbol_map.find(symbol);
+
+  if (orderbook == symbol_map.end()) {
+    return false;
+  }
+
+  orderbook->second->add_order(order);
+  return true;
+}
