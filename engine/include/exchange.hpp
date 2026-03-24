@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
@@ -18,16 +19,29 @@ class Exchange {
   /**
    * @brief If symbol doesn't already exist, method creates new orderbook and
    * add it's unique ptr to global symbol_map
-   * @param symbol to be added
+   * @param symbol the symbol to be added
    */
   void add_book(std::string symbol);
 
   /**
    * @brief Removes the entry for the symbol in symbol_map as well as the
    * corresponding orderbook.
-   * @param symbol to be removed
+   * @param symbol the symbol to be removed
    */
   void remove_book(std::string symbol);
 
+  /**
+   * @brief Appropriately routes incoming order to correct orderbook, doesn't
+   * edit orderbook directly
+   * @param symbol the symbol corresponding to the order
+   * @param order the order to be executed/added to orderbook
+   */
   bool add_order(std::string symbol, Order Order);
+  /**
+   * Method meant to be called upon by clients, not other methods. This is not
+   * as optimized as the function that removes filled orders.
+   * @param symbol the symbol for the order to be manually removed
+   * @param order_id the unique id for the order to be removed
+   */
+  bool remove_order(std::string symbol, uint32_t order_id);
 };

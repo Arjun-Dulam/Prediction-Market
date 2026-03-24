@@ -19,7 +19,6 @@ void Exchange::add_book(std::string symbol) {
 void Exchange::remove_book(std::string symbol) {
   std::unique_lock<std::shared_mutex> lock(mutex_);
   symbol_map.erase(symbol);
-  return;
 }
 
 bool Exchange::add_order(std::string symbol, Order order) {
@@ -32,4 +31,18 @@ bool Exchange::add_order(std::string symbol, Order order) {
 
   orderbook->second->add_order(order);
   return true;
+
+  // TODO: need to modify add_order for OrderBook class
+  // so that we can return boolean instead of vector.
+}
+
+bool Exchange::remove_order(std::string symbol, uint32_t order_id) {
+  std::shared_lock<std::shared_mutex> lock(mutex_);
+  auto orderbook = symbol_map.find(symbol);
+
+  if (orderbook == symbol_map.end()) {
+    return false;
+  }
+
+  return orderbook->second->remove_order(order_id);
 }
