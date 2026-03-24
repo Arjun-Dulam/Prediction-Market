@@ -2,8 +2,16 @@
 !README.md
 .DS_Store
 
+# IDE / editor config
+.idea/
+.vscode/
+.clangd
+*.iml
+
+# clangd cache
+.cache/
+
 # C++ build directories
 engine/build/
 engine/cmake-build-debug/
 engine/cmake-build-release/
-engine/.idea
