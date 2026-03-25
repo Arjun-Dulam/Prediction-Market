@@ -19,6 +19,7 @@ void Exchange::add_book(std::string symbol) {
 void Exchange::remove_book(std::string symbol) {
   std::unique_lock<std::shared_mutex> lock(mutex_);
   symbol_map.erase(symbol);
+  return;
 }
 
 bool Exchange::add_order(std::string symbol, Order order) {
