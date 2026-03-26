@@ -2,34 +2,32 @@
 
 #include <condition_variable>
 #include <mutex>
+#include <optional>
 #include <queue>
 
-#include "../include/order.hpp"
-
+template <typename T>
 class ThreadSafeQueue {
  public:
   ThreadSafeQueue() = default;
 
-  void push(Order item) {
+  void push(T item) {
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      queue_.push(item);
+      queue_.emplace(std::move(item));
     }
     cond_.notify_one();
   }
 
-  Order dequeue() {
-    Order res;
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      res = queue_.front();
-      queue_.pop();
-    }
-    return res;
+  std::optional<T> wait_and_pop() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    cond_.wait(lock, [&] { return !queue_.empty(); });
+    T item = std::move(queue_.front());
+    queue_.pop();
+    return item;
   }
 
  private:
   std::mutex mutex_;
-  std::queue<Order> queue_;
+  std::queue<T> queue_;
   std::condition_variable cond_;
 };
