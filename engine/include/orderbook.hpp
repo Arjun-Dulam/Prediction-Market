@@ -39,8 +39,7 @@ class OrderBook {
    * @param order Order that has recently been added
    * @param executed_trades Pointer to modifiable vector
    */
-  void init_trades_with_order(Order& order,
-                              std::vector<Trade>* executed_trades);
+  void init_trades_with_order(Order& order);
 
   /**
    * @brief removes filled orders from given map

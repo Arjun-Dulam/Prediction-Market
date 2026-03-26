@@ -28,9 +28,8 @@ OrderBook::OrderBook() {
 void OrderBook::add_order(Order& new_order) {
   new_order.timestamp = next_timestamp++;
   new_order.order_id = next_order_id++;
-  std::vector<Trade> executed_trades;
 
-  init_trades_with_order(new_order, &executed_trades);
+  init_trades_with_order(new_order);
 
   // Add order to orderbook if order not completely satisfied
 
@@ -45,8 +44,7 @@ void OrderBook::add_order(Order& new_order) {
   return;
 }
 
-void OrderBook::init_trades_with_order(Order& order,
-                                       std::vector<Trade>* executed_trades) {
+void OrderBook::init_trades_with_order(Order& order) {
   while (order.quantity > 0) {
     if (order.side == Side::Buy && asks.empty()) {
       return;
@@ -102,7 +100,6 @@ void OrderBook::init_trades_with_order(Order& order,
     }
 
     trades.push_back(new_trade);
-    executed_trades->push_back(new_trade);
   }
 }
 

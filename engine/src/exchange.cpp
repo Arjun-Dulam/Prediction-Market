@@ -32,9 +32,6 @@ bool Exchange::add_order(std::string symbol, Order& order) {
 
   orderbook->second->queue_.push(order);
   return true;
-
-  // TODO: need to modify add_order for OrderBook class
-  // so that we can return boolean instead of vector.
 }
 
 bool Exchange::remove_order(std::string symbol, uint32_t order_id) {
