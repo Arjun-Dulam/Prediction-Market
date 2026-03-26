@@ -1,4 +1,5 @@
 #include <iterator>
+#include <mutex>
 
 #include "../include/orderbook.hpp"
 #define COMPACTION_RATIO 0.15
@@ -133,6 +134,7 @@ bool OrderBook::remove_order(uint32_t order_id) {
 const std::vector<Trade>& OrderBook::show_trades() const { return trades; }
 
 int32_t OrderBook::get_last_trade_price() const {
+  std::lock_guard<std::mutex> lock(mutex_);
   if (trades.empty()) {
     return -1;
   }
@@ -140,6 +142,7 @@ int32_t OrderBook::get_last_trade_price() const {
 }
 
 int32_t OrderBook::get_best_ask() const {
+  std::lock_guard<std::mutex> lock(mutex_);
   if (asks.empty()) {
     return -1;
   }
@@ -147,6 +150,7 @@ int32_t OrderBook::get_best_ask() const {
 };
 
 int32_t OrderBook::get_best_bid() const {
+  std::lock_guard<std::mutex> lock(mutex_);
   if (bids.empty()) {
     return -1;
   }
