@@ -3,6 +3,8 @@
 
 using std::thread;
 
+OrderBook::~OrderBook() { worker_.detach(); }
+
 OrderBook::OrderBook() {
   next_timestamp = 0;
   next_trade_id = 0;

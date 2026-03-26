@@ -50,6 +50,7 @@ class OrderBook {
 
  public:
   OrderBook();
+  ~OrderBook();
 
   ThreadSafeQueue<Order> queue_;
   std::thread worker_;
