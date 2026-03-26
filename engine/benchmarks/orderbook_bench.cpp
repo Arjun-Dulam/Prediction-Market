@@ -70,9 +70,10 @@ static void BM_AddOrder_No_Match(benchmark::State& state) {
   size_t order_idx = 0;
 
   for (auto _ : state) {
-    auto trade = order_book.add_order(
+    order_book.add_order(
         shared.no_match_orders[shared.shuffled_indices[order_idx]]);
-    benchmark::DoNotOptimize(trade);
+    benchmark::ClobberMemory();
+
     order_idx = (order_idx + 1) % SharedOrderData::NUM_ORDERS;
   }
 
@@ -109,13 +110,14 @@ static void BM_AddOrder_Latency(benchmark::State& state) {
 
   for (auto _ : state) {
     auto start = std::chrono::high_resolution_clock::now();
-    auto trade = order_book.add_order(
+    order_book.add_order(
         shared.no_match_orders[shared.shuffled_indices[order_idx]]);
+    benchmark::ClobberMemory();
     auto end = std::chrono::high_resolution_clock::now();
 
     double dur = std::chrono::duration<double, std::nano>(end - start).count();
     latencies.push_back(dur);
-    benchmark::DoNotOptimize(trade);
+
     order_idx = (order_idx + 1) % SharedOrderData::NUM_ORDERS;
   }
 
@@ -223,9 +225,9 @@ static void BM_MatchingPerformance(benchmark::State& state) {
       state.ResumeTiming();
     }
 
-    auto trade = order_book->add_order(
+    order_book->add_order(
         shared.matching_orders[shared.shuffled_indices[orderIdx]]);
-    benchmark::DoNotOptimize(trade);
+    benchmark::ClobberMemory();
 
     orderIdx++;
   }
@@ -281,13 +283,13 @@ static void BM_MatchingLatency(benchmark::State& state) {
     }
 
     auto start = std::chrono::high_resolution_clock::now();
-    auto trade = order_book->add_order(
+    order_book->add_order(
         shared.matching_orders[shared.shuffled_indices[orderIdx]]);
+    benchmark::ClobberMemory();
     auto end = std::chrono::high_resolution_clock::now();
 
     double dur = std::chrono::duration<double, std::nano>(end - start).count();
     latencies.push_back(dur);
-    benchmark::DoNotOptimize(trade);
 
     orderIdx++;
   }

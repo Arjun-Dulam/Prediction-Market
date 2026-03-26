@@ -47,16 +47,16 @@ class OrderBookTest : public ::testing::Test {
 
 TEST_F(OrderBookTest, AddBuyOrderToEmptyBook_NoMatch) {
   Order buy(10000, 100, Side::Buy, false);
-  auto trades = book.add_order(buy);
-
+  book.add_order(buy);
+  const auto& trades = book.show_trades();
   EXPECT_TRUE(trades.empty());
   EXPECT_EQ(buy.get_order_id(), 0);
 }
 
 TEST_F(OrderBookTest, AddSellOrderToEmptyBook_NoMatch) {
   Order sell(10000, 100, Side::Sell, false);
-  auto trades = book.add_order(sell);
-
+  book.add_order(sell);
+  const auto& trades = book.show_trades();
   EXPECT_TRUE(trades.empty());
   EXPECT_EQ(sell.get_order_id(), 0);
 }
@@ -90,7 +90,8 @@ TEST_F(OrderBookTest, BuyMatchesBestAsk) {
   book.add_order(sell);
 
   Order buy(10000, 50, Side::Buy, false);
-  auto trades = book.add_order(buy);
+  book.add_order(buy);
+  const auto& trades = book.show_trades();
 
   ASSERT_EQ(trades.size(), 1);
   EXPECT_EQ(trades[0].price, 10000);
@@ -104,7 +105,8 @@ TEST_F(OrderBookTest, SellMatchesBestBid) {
   book.add_order(buy);
 
   Order sell(10000, 50, Side::Sell, false);
-  auto trades = book.add_order(sell);
+  book.add_order(sell);
+  const auto& trades = book.show_trades();
 
   ASSERT_EQ(trades.size(), 1);
   EXPECT_EQ(trades[0].price, 10000);
@@ -116,7 +118,8 @@ TEST_F(OrderBookTest, BuyMatchesLowerAsk) {
   book.add_order(sell);
 
   Order buy(10000, 50, Side::Buy, false);
-  auto trades = book.add_order(buy);
+  book.add_order(buy);
+  const auto& trades = book.show_trades();
 
   ASSERT_EQ(trades.size(), 1);
   EXPECT_EQ(trades[0].price, 9900);
@@ -127,7 +130,8 @@ TEST_F(OrderBookTest, SellMatchesHigherBid) {
   book.add_order(buy);
 
   Order sell(10000, 50, Side::Sell, false);
-  auto trades = book.add_order(sell);
+  book.add_order(sell);
+  const auto& trades = book.show_trades();
 
   ASSERT_EQ(trades.size(), 1);
   EXPECT_EQ(trades[0].price, 10100);
@@ -138,7 +142,8 @@ TEST_F(OrderBookTest, NoMatchWhenPricesDontOverlap) {
   book.add_order(sell);
 
   Order buy(10000, 50, Side::Buy, false);
-  auto trades = book.add_order(buy);
+  book.add_order(buy);
+  const auto& trades = book.show_trades();
 
   EXPECT_TRUE(trades.empty());
 }
@@ -148,7 +153,8 @@ TEST_F(OrderBookTest, PartialFillBuyOrder) {
   book.add_order(sell);
 
   Order buy(10000, 50, Side::Buy, false);
-  auto trades = book.add_order(buy);
+  book.add_order(buy);
+  const auto& trades = book.show_trades();
 
   ASSERT_EQ(trades.size(), 1);
   EXPECT_EQ(trades[0].quantity, 30);
@@ -160,7 +166,8 @@ TEST_F(OrderBookTest, PartialFillSellOrder) {
   book.add_order(buy);
 
   Order sell(10000, 50, Side::Sell, false);
-  auto trades = book.add_order(sell);
+  book.add_order(sell);
+  const auto& trades = book.show_trades();
 
   ASSERT_EQ(trades.size(), 1);
   EXPECT_EQ(trades[0].quantity, 30);
@@ -176,7 +183,8 @@ TEST_F(OrderBookTest, MultipleFillsInOneOrder) {
   book.add_order(sell3);
 
   Order buy(10100, 100, Side::Buy, false);
-  auto trades = book.add_order(buy);
+  book.add_order(buy);
+  const auto& trades = book.show_trades();
 
   ASSERT_EQ(trades.size(), 3);
   EXPECT_EQ(trades[0].price, 9900);
@@ -194,7 +202,8 @@ TEST_F(OrderBookTest, PriceTimePriority_SamePriceFIFO) {
   book.add_order(sell2);
 
   Order buy(10000, 50, Side::Buy, false);
-  auto trades = book.add_order(buy);
+  book.add_order(buy);
+  const auto& trades = book.show_trades();
 
   ASSERT_EQ(trades.size(), 1);
   EXPECT_EQ(trades[0].sell_order_id, sell1.get_order_id());
@@ -207,13 +216,13 @@ TEST_F(OrderBookTest, PriceTimePriority_BetterPriceFirst) {
   book.add_order(sell_cheap);
 
   Order buy(10100, 50, Side::Buy, false);
-  auto trades = book.add_order(buy);
+  book.add_order(buy);
+  const auto& trades = book.show_trades();
 
   ASSERT_EQ(trades.size(), 1);
   EXPECT_EQ(trades[0].price, 9900);
   EXPECT_EQ(trades[0].sell_order_id, sell_cheap.get_order_id());
 }
-
 
 TEST_F(OrderBookTest, RemoveExistingOrderReturnsTrue) {
   Order order(10000, 100, Side::Buy, false);
@@ -232,7 +241,8 @@ TEST_F(OrderBookTest, RemovedOrderDoesNotMatch) {
   book.remove_order(sell.get_order_id());
 
   Order buy(10000, 50, Side::Buy, false);
-  auto trades = book.add_order(buy);
+  book.add_order(buy);
+  const auto& trades = book.show_trades();
 
   EXPECT_TRUE(trades.empty());
 }
@@ -246,7 +256,8 @@ TEST_F(OrderBookTest, RemoveOneOfMultipleSamePriceOrders) {
   book.remove_order(sell1.get_order_id());
 
   Order buy(10000, 50, Side::Buy, false);
-  auto trades = book.add_order(buy);
+  book.add_order(buy);
+  const auto& trades = book.show_trades();
 
   ASSERT_EQ(trades.size(), 1);
   EXPECT_EQ(trades[0].sell_order_id, sell2.get_order_id());
@@ -300,7 +311,8 @@ TEST_F(OrderBookTest, CompactionRemovesDeletedOrders) {
   book.compact_orderbook();
 
   Order buy(10000, 50, Side::Buy, false);
-  auto trades = book.add_order(buy);
+  book.add_order(buy);
+  const auto& trades = book.show_trades();
 
   ASSERT_EQ(trades.size(), 1);
   EXPECT_EQ(trades[0].sell_order_id, sell2.get_order_id());
@@ -350,7 +362,8 @@ TEST_F(OrderBookTest, NegativePriceMatching) {
   book.add_order(sell);
 
   Order buy(-100, 1000, Side::Buy, false);
-  auto trades = book.add_order(buy);
+  book.add_order(buy);
+  const auto& trades = book.show_trades();
 
   ASSERT_EQ(trades.size(), 1);
   EXPECT_EQ(trades[0].price, -100);
@@ -361,7 +374,8 @@ TEST_F(OrderBookTest, LargeQuantityOrder) {
   book.add_order(sell);
 
   Order buy(10000, 1000, Side::Buy, false);
-  auto trades = book.add_order(buy);
+  book.add_order(buy);
+  const auto& trades = book.show_trades();
 
   ASSERT_EQ(trades.size(), 1);
   EXPECT_EQ(trades[0].quantity, 1000);
@@ -376,7 +390,8 @@ TEST_F(OrderBookTest, ManyOrdersSamePriceLevel) {
   }
 
   Order buy(10000, 1000, Side::Buy, false);
-  auto trades = book.add_order(buy);
+  book.add_order(buy);
+  const auto& trades = book.show_trades();
 
   EXPECT_EQ(trades.size(), 100);
 
@@ -392,12 +407,10 @@ TEST_F(OrderBookTest, AlternatingBuySellNoMatches) {
     Order buy(9000 + i * 10, 100, Side::Buy, false);
     Order sell(11000 + i * 10, 100, Side::Sell, false);
 
-    auto buy_trades = book.add_order(buy);
-    auto sell_trades = book.add_order(sell);
-
-    EXPECT_TRUE(buy_trades.empty());
-    EXPECT_TRUE(sell_trades.empty());
+    book.add_order(buy);
+    book.add_order(sell);
   }
+  EXPECT_TRUE(book.show_trades().empty());
 }
 
 TEST_F(OrderBookTest, AggressorOrderQuantityUpdatedOnFullFill) {
@@ -405,7 +418,8 @@ TEST_F(OrderBookTest, AggressorOrderQuantityUpdatedOnFullFill) {
   book.add_order(sell);
 
   Order buy(10000, 50, Side::Buy, false);
-  auto trades = book.add_order(buy);
+  book.add_order(buy);
+  const auto& trades = book.show_trades();
 
   EXPECT_EQ(buy.quantity, 0);
   EXPECT_EQ(trades.size(), 1);
@@ -416,7 +430,8 @@ TEST_F(OrderBookTest, AggressorOrderQuantityUpdatedOnPartialFill) {
   book.add_order(sell);
 
   Order buy(10000, 30, Side::Buy, false);
-  auto trades = book.add_order(buy);
+  book.add_order(buy);
+  const auto& trades = book.show_trades();
 
   EXPECT_EQ(buy.quantity, 0);
   EXPECT_EQ(trades.size(), 1);
@@ -454,12 +469,10 @@ TEST_F(OrderBookTest, HighVolumeMatching) {
   }
 
   Order buy(10000 + NUM_ORDERS, 5000, Side::Buy, false);
-  auto trades = book.add_order(buy);
+  book.add_order(buy);
+  const auto& trades = book.show_trades();
 
-  EXPECT_EQ(trades.size(), NUM_ORDERS);
-
-  const auto& all_trades = book.show_trades();
-  EXPECT_EQ(all_trades.size(), NUM_ORDERS);
+  EXPECT_EQ(trades.size(), (size_t)NUM_ORDERS);
 }
 
 class ExchangeTest : public ::testing::Test {
