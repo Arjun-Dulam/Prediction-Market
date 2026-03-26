@@ -84,6 +84,12 @@ class OrderBook {
    */
   const std::vector<Trade>& show_trades() const;
 
+  int32_t get_last_trade_price() const;
+
+  int32_t get_best_bid() const;
+
+  int32_t get_best_ask() const;
+
   /**
    * @brief Removes filled/deleted orders from orderbook.
    */

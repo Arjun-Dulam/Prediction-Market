@@ -1,3 +1,5 @@
+#include <iterator>
+
 #include "../include/orderbook.hpp"
 #define COMPACTION_RATIO 0.15
 
@@ -70,7 +72,6 @@ void OrderBook::init_trades_with_order(Order& order,
       } else {
         bids.erase(intermediate);
       }
-
       continue;
     }
 
@@ -133,6 +134,27 @@ bool OrderBook::remove_order(uint32_t order_id) {
 }
 
 const std::vector<Trade>& OrderBook::show_trades() const { return trades; }
+
+int32_t OrderBook::get_last_trade_price() const {
+  if (trades.empty()) {
+    return -1;
+  }
+  return trades.back().price;
+}
+
+int32_t OrderBook::get_best_ask() const {
+  if (asks.empty()) {
+    return -1;
+  }
+  return asks.begin()->first;
+};
+
+int32_t OrderBook::get_best_bid() const {
+  if (bids.empty()) {
+    return -1;
+  }
+  return std::prev(bids.end())->first;
+};
 
 void OrderBook::compact_orderbook() {
   compact_orderbook_helper(bids);
