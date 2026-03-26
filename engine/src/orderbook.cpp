@@ -9,7 +9,6 @@ OrderBook::OrderBook() {
 }
 
 std::vector<Trade> OrderBook::add_order(Order& new_order) {
-  std::lock_guard<std::mutex> lock(mutex_);
   new_order.timestamp = next_timestamp++;
   new_order.order_id = next_order_id++;
   std::vector<Trade> executed_trades;
@@ -107,7 +106,6 @@ void OrderBook::mark_order_deleted(Order* order) {
 }
 
 bool OrderBook::remove_order(uint32_t order_id) {
-  std::lock_guard<std::mutex> lock(mutex_);
   auto it = order_lookup.find(order_id);
   if (it == order_lookup.end()) {
     return false;
