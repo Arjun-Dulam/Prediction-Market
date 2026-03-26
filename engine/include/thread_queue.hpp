@@ -10,7 +10,7 @@ class ThreadSafeQueue {
  public:
   ThreadSafeQueue() = default;
 
-  void push(T item) {
+  void push(T& item) {
     {
       std::lock_guard<std::mutex> lock(mutex_);
       queue_.emplace(std::move(item));

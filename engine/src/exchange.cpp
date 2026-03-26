@@ -22,7 +22,7 @@ void Exchange::remove_book(std::string symbol) {
   return;
 }
 
-bool Exchange::add_order(std::string symbol, Order order) {
+bool Exchange::add_order(std::string symbol, Order& order) {
   std::shared_lock<std::shared_mutex> lock(mutex_);
   auto orderbook = symbol_map.find(symbol);
 
@@ -30,7 +30,7 @@ bool Exchange::add_order(std::string symbol, Order order) {
     return false;
   }
 
-  orderbook->second->add_order(order);
+  orderbook->second->queue_.push(order);
   return true;
 
   // TODO: need to modify add_order for OrderBook class

@@ -36,7 +36,7 @@ class Exchange {
    * @param symbol the symbol corresponding to the order
    * @param order the order to be executed/added to orderbook
    */
-  bool add_order(std::string symbol, Order Order);
+  bool add_order(std::string symbol, Order& Order);
   /**
    * Method meant to be called upon by clients, not other methods. This is not
    * as optimized as the function that removes filled orders.

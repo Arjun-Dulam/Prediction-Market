@@ -1,23 +1,30 @@
 #include "../include/orderbook.hpp"
 #define COMPACTION_RATIO 0.15
 
+using std::thread;
+
 OrderBook::OrderBook() {
   next_timestamp = 0;
   next_trade_id = 0;
   next_order_id = 0;
   order_lookup.reserve(15000000);
+
+  worker_ = thread([this] {
+    while (true) {
+      auto order = queue_.wait_and_pop();
+      if (order) {
+        add_order(*order);
+      }
+    }
+  });
 }
 
-std::vector<Trade> OrderBook::add_order(Order& new_order) {
+void OrderBook::add_order(Order& new_order) {
   new_order.timestamp = next_timestamp++;
   new_order.order_id = next_order_id++;
   std::vector<Trade> executed_trades;
 
   init_trades_with_order(new_order, &executed_trades);
-
-  if (new_order.quantity == 0) {
-    return executed_trades;
-  }
 
   // Add order to orderbook if order not completely satisfied
 
@@ -29,7 +36,7 @@ std::vector<Trade> OrderBook::add_order(Order& new_order) {
   order_lookup[new_order.order_id] = order_location;
   total_orders_count++;
 
-  return executed_trades;
+  return;
 }
 
 void OrderBook::init_trades_with_order(Order& order,

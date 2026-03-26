@@ -3,10 +3,12 @@
 #include <cstdint>
 #include <map>
 #include <mutex>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
 #include "order.hpp"
+#include "thread_queue.hpp"
 
 class OrderBook {
  private:
@@ -22,6 +24,7 @@ class OrderBook {
       bids;  // Mapping price to array of corresponding bids
   std::unordered_map<uint32_t, OrderLocation>
       order_lookup;  // Mapping order id to order location
+
   std::vector<Trade> trades;
   uint64_t next_timestamp;
   uint32_t next_trade_id;
@@ -31,8 +34,8 @@ class OrderBook {
   std::mutex mutex_;
 
   /**
-   * @brief Executes possible trades given the addition of a new order. Modifies
-   * executed_trades in place.
+   * @brief Executes possible trades given the addition of a new order.
+   * Modifies executed_trades in place.
    * @param order Order that has recently been added
    * @param executed_trades Pointer to modifiable vector
    */
@@ -48,12 +51,15 @@ class OrderBook {
  public:
   OrderBook();
 
+  ThreadSafeQueue<Order> queue_;
+  std::thread worker_;
+
   /**
    * @brief Adds order to order book, executes and returns possible trades
    * @param order Address of new order to be added to orderbook
    * @return Vector containing trades executed upon new order addition
    */
-  std::vector<Trade> add_order(Order& order);
+  void add_order(Order& order);
 
   /**
    * @brief Scans and removes order if it exists, to be used by traders with no
