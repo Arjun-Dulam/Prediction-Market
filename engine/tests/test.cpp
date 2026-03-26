@@ -1,3 +1,6 @@
+#include <chrono>
+#include <thread>
+
 #include "../include/exchange.hpp"
 #include "../include/order.hpp"
 #include "../include/orderbook.hpp"
@@ -562,9 +565,9 @@ TEST_F(ExchangeTest, RemoveOrderFromCorrectSymbol) {
 
   Order aapl_order(15000, 100, Side::Buy, false);
   exchange.add_order("AAPL", aapl_order);
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
   EXPECT_FALSE(exchange.remove_order("GOOG", aapl_order.get_order_id()));
-
   EXPECT_TRUE(exchange.remove_order("AAPL", aapl_order.get_order_id()));
 }
 
@@ -573,6 +576,7 @@ TEST_F(ExchangeTest, RemoveOrderTwiceReturnsFalse) {
 
   Order order(15000, 100, Side::Buy, false);
   exchange.add_order("AAPL", order);
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
   EXPECT_TRUE(exchange.remove_order("AAPL", order.get_order_id()));
   EXPECT_FALSE(exchange.remove_order("AAPL", order.get_order_id()));

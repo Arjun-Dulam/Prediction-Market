@@ -3,7 +3,10 @@
 
 using std::thread;
 
-OrderBook::~OrderBook() { worker_.detach(); }
+OrderBook::~OrderBook() {
+  queue_.close();
+  worker_.join();
+}
 
 OrderBook::OrderBook() {
   next_timestamp = 0;
@@ -14,9 +17,8 @@ OrderBook::OrderBook() {
   worker_ = thread([this] {
     while (true) {
       auto order = queue_.wait_and_pop();
-      if (order) {
-        add_order(*order);
-      }
+      if (!order) break;
+      add_order(*order);
     }
   });
 }
