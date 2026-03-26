@@ -32,6 +32,7 @@ find_package(Threads REQUIRED)
 set(ORDERBOOK_SOURCES
     src/orderbook.cpp
     src/order.cpp
+    src/exchange.cpp
 )
 
 add_executable(OrderBookBenchmark
