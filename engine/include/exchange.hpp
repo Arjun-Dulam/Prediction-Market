@@ -12,6 +12,7 @@ class Exchange {
  private:
   std::unordered_map<std::string, std::unique_ptr<OrderBook>> symbol_map;
   mutable std::shared_mutex mutex_;
+  std::atomic<uint64_t> next_order_id = 1;
 
  public:
   Exchange();

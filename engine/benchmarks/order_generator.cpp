@@ -40,8 +40,7 @@ Order OrderGenerator::generate_order() {
     Order new_order(
         generate_price(),
         generate_quantity(),
-        generate_side(),
-        false
+        generate_side()
     );
 
     return new_order;
