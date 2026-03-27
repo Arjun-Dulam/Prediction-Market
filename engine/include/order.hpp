@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -9,8 +10,10 @@ class Order {
  private:
   uint64_t timestamp;
   uint32_t order_id;
+  bool deleted_or_filled = false;
   friend class OrderBook;
   friend class OrderGenerator;
+  friend class Exchange;
 
  public:
   int32_t price;
@@ -19,18 +22,18 @@ class Order {
   // what happened to oil in 2020.
   uint32_t quantity;
   Side side;
-  bool deleted_or_filled = false;
 
   inline uint64_t get_timestamp() const { return timestamp; }
   inline uint32_t get_order_id() const { return order_id; }
+  inline bool get_tombstone() const { return deleted_or_filled; }
 
-  Order(int32_t p, uint32_t q, Side s, bool d_o_f)
+  Order(int32_t price, uint32_t quantity, Side side)
       : timestamp(0),
         order_id(0),
-        price(p),
-        quantity(q),
-        side(s),
-        deleted_or_filled(d_o_f) {}
+        deleted_or_filled(false),
+        price(price),
+        quantity(quantity),
+        side(side) {}
 };
 
 class Trade {

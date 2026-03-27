@@ -12,9 +12,6 @@ OrderBook::~OrderBook() {
 }
 
 OrderBook::OrderBook() {
-  next_timestamp = 0;
-  next_trade_id = 0;
-  next_order_id = 0;
   order_lookup.reserve(15000000);
 
   worker_ = thread([this] {
@@ -27,9 +24,8 @@ OrderBook::OrderBook() {
 }
 
 void OrderBook::add_order(Order& new_order) {
-  new_order.timestamp = next_timestamp++;
-  new_order.order_id = next_order_id++;
-
+  new_order.timestamp = orderbook_timestamp++;
+  if (new_order.order_id == 0) new_order.order_id = next_order_id++;
   init_trades_with_order(new_order);
 
   // Add order to orderbook if order not completely satisfied
@@ -91,8 +87,6 @@ void OrderBook::init_trades_with_order(Order& order) {
         std::min(order.quantity, existing_order->quantity),
         (order.side == Side::Buy) ? order.order_id : existing_order->order_id,
         (order.side == Side::Sell) ? order.order_id : existing_order->order_id};
-
-    next_trade_id++;
 
     order.quantity -= new_trade.quantity;
     existing_order->quantity -= new_trade.quantity;

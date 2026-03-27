@@ -23,6 +23,7 @@ void Exchange::remove_book(std::string symbol) {
 }
 
 bool Exchange::add_order(std::string symbol, Order& order) {
+  order.order_id = next_order_id++;
   std::shared_lock<std::shared_mutex> lock(mutex_);
   auto orderbook = symbol_map.find(symbol);
 
