@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package exchange_comms;
+
+enum Side {
+  SIDE_BUY = 0;
+  SIDE_SELL = 1;
+}
+
+message Order {
+  int32 price = 1;
+  uint32 quantity = 2;
+  Side side = 3;
+}
+
+message OrderSubmission {
+  Order order = 1;
+  string symbol = 2;
+}
