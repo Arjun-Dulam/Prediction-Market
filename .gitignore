@@ -13,6 +13,7 @@
 .cache/
 
 # C++ build directories
+build/
 engine/build/
 engine/cmake-build-debug/
 engine/cmake-build-release/
