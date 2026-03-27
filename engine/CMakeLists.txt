@@ -34,6 +34,29 @@ set(gtest_force_shared_crt
 FetchContent_MakeAvailable(benchmark googletest)
 
 find_package(Threads REQUIRED)
+find_package(gRPC REQUIRED)
+
+find_program(PROTOC_EXE NAMES protoc REQUIRED)
+find_program(GRPC_CPP_PLUGIN NAMES grpc_cpp_plugin REQUIRED)
+
+set(PROTO_OUT ${CMAKE_BINARY_DIR}/proto)
+file(MAKE_DIRECTORY ${PROTO_OUT})
+
+set(PROTO_FILE ${CMAKE_CURRENT_SOURCE_DIR}/proto/exchange.proto)
+set(PROTO_SRCS ${PROTO_OUT}/exchange.pb.cc)
+set(PROTO_HDRS ${PROTO_OUT}/exchange.pb.h)
+set(GRPC_SRCS ${PROTO_OUT}/exchange.grpc.pb.cc)
+set(GRPC_HDRS ${PROTO_OUT}/exchange.grpc.pb.h)
+
+add_custom_command(
+  OUTPUT ${PROTO_SRCS}
+         ${PROTO_HDRS}
+         ${GRPC_SRCS}
+         ${GRPC_HDRS}
+  COMMAND ${PROTOC_EXE} ARGS --grpc_out=${PROTO_OUT} --cpp_out=${PROTO_OUT}
+          --plugin=protoc-gen-grpc=${GRPC_CPP_PLUGIN} -I${CMAKE_CURRENT_SOURCE_DIR}/proto ${PROTO_FILE}
+  DEPENDS ${PROTO_FILE}
+  COMMENT "Generating gRPC/protobuf C++ files")
 
 set(ORDERBOOK_SOURCES src/orderbook.cpp src/order.cpp src/exchange.cpp)
 
@@ -69,3 +92,19 @@ target_link_options(
 
 enable_testing()
 add_test(NAME OrderBookTests COMMAND OrderBookTests)
+
+add_executable(
+  MatchingEngineServer
+  src/grpc_server.cpp
+  src/main_server.cpp
+  ${ORDERBOOK_SOURCES}
+  ${PROTO_SRCS}
+  ${GRPC_SRCS})
+
+target_include_directories(MatchingEngineServer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${PROTO_OUT})
+
+target_link_libraries(
+  MatchingEngineServer
+  gRPC::grpc++
+  protobuf::libprotobuf
+  Threads::Threads)
