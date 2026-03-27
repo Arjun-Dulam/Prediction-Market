@@ -17,3 +17,34 @@ message OrderSubmission {
   Order order = 1;
   string symbol = 2;
 }
+
+message OrderDeletion {
+  string symbol = 1;
+  uint32 order_id = 2;
+}
+
+message Symbol {
+  string symbol = 1;
+}
+
+message Boolean {
+  bool boolean = 1;
+}
+
+message Price {
+  int32 price = 1;
+}
+
+message OrderID {
+  uint32 order_id = 1;
+}
+
+service MatchingEngine {
+  rpc AddBook(Symbol) returns (Boolean); 
+  rpc RemoveBook(Symbol) returns (Boolean); 
+  rpc AddOrder(OrderSubmission) returns (OrderID);
+  rpc RemoveOrder(OrderDeletion) returns (Boolean);
+  rpc GetBestBid(Symbol) returns (Price); 
+  rpc GetBestAsk(Symbol) returns (Price); 
+  rpc GetLastTradePrice(Symbol) returns (Price);
+}

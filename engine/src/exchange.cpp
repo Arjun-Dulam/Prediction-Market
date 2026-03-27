@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
@@ -44,4 +45,22 @@ bool Exchange::remove_order(std::string symbol, uint32_t order_id) {
   }
 
   return orderbook->second->remove_order(order_id);
+}
+
+int32_t Exchange::get_best_bid(std::string symbol) const {
+  std::shared_lock<std::shared_mutex> lock(mutex_);
+  auto orderbook = symbol_map.find(symbol);
+  return orderbook->second->get_best_bid();
+}
+
+int32_t Exchange::get_best_ask(std::string symbol) const {
+  std::shared_lock<std::shared_mutex> lock(mutex_);
+  auto orderbook = symbol_map.find(symbol);
+  return orderbook->second->get_best_ask();
+}
+
+int32_t Exchange::get_last_trade_price(std::string symbol) const {
+  std::shared_lock<std::shared_mutex> lock(mutex_);
+  auto orderbook = symbol_map.find(symbol);
+  return orderbook->second->get_last_trade_price();
 }
