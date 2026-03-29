@@ -1,5 +1,6 @@
 *.md
 !README.md
+!docs/**/*.md
 .DS_Store
 
 # IDE / editor config
@@ -14,6 +15,9 @@
 
 # C++ build directories
 build/
+out/
 engine/build/
 engine/cmake-build-debug/
 engine/cmake-build-release/
+cmake-build-debug/
+cmake-build-release/

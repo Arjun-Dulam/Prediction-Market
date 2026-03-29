@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 from collections import defaultdict
 import sys
 import os
+from pathlib import Path
 
 def parse_benchmark_results(file_path):
     """Parse Google Benchmark output and extract performance data."""
@@ -227,9 +228,9 @@ def print_summary(data):
             print(f"  {depth_label:20} → Best: Ratio {best_ratio:.2f} ({best_throughput:.2f} M/s)")
 
 if __name__ == "__main__":
-    # Configuration - paths relative to project root
-    results_file = "benchmark_results/results/compaction_ratios_run2"
-    output_dir = "benchmark_results/results/run_3"
+    engine_dir = Path(__file__).resolve().parents[2]
+    results_file = engine_dir / "benchmarks" / "results" / "compaction_ratios_run2"
+    output_dir = engine_dir / "benchmarks" / "results" / "run_3"
 
     print("Compaction Ratio Performance Analysis")
     print("=" * 60)
