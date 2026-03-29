@@ -1,8 +1,0 @@
-Exchange:
- - Assigns order_id
- - Assigns timestamp
-
-Orderbook
- - Assigns trade_id
- - Exchange can idenfity a trade with a symbol and trade_id
-

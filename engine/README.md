@@ -1,9 +1,9 @@
-# Orderbook
+# Prediction Market Exchange Engine
 
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://isocpp.org/)
 [![CMake](https://img.shields.io/badge/CMake-3.21+-green.svg)](https://cmake.org/)
 
-A high-performance limit order matching engine achieving **2.78 million orders per second** with matching.
+A high-performance matching engine for the Prediction Market Exchange, achieving **2.78 million orders per second** with matching.
 
 ---
 
@@ -119,15 +119,17 @@ Five benchmarks measure different aspects of performance:
 
 ### Build
 
+From the repository root:
+
 ```bash
-cmake -B build
+cmake -S . -B build
 cmake --build build
 ```
 
 ### Run Benchmarks
 
 ```bash
-./build/OrderBookBenchmark
+./build/engine/OrderBookBenchmark
 ```
 
 Example output:
@@ -145,7 +147,7 @@ BM_AddOrder_No_Match/1000    301 ns          301 ns      2325581    items_per_se
 ### Run Unit Tests
 
 ```bash
-./build/OrderBookTests
+./build/engine/OrderBookTests
 ```
 
 39 unit tests covering:
@@ -160,7 +162,7 @@ BM_AddOrder_No_Match/1000    301 ns          301 ns      2325581    items_per_se
 ## Project Structure
 
 ```
-Orderbook/
+engine/
 ├── include/
 │   ├── order.hpp           # Order, Trade classes, Side enum
 │   └── orderbook.hpp       # OrderBook interface
@@ -172,8 +174,9 @@ Orderbook/
 │   └── order_generator.*   # Realistic order generation
 ├── tests/
 │   └── test.cpp            # Google Test suite
-├── benchmark_results/
-│   └── scripts/            # Analysis tools
+├── benchmarks/
+│   ├── scripts/            # Benchmark analysis tools
+│   └── results/            # Generated benchmark output
 └── CMakeLists.txt          # Build configuration
 ```
 
