@@ -1,10 +1,10 @@
+#include "../include/exchange.hpp"
+
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
 #include <string>
-
-#include "../include/exchange.hpp"
 
 Exchange::Exchange() {}
 

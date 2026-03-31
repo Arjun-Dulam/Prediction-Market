@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(PredictionMarketExchangeEngine VERSION 1.0)
+project(StockExchange VERSION 1.0)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -34,15 +34,19 @@ set(gtest_force_shared_crt
 FetchContent_MakeAvailable(benchmark googletest)
 
 find_package(Threads REQUIRED)
-find_package(gRPC REQUIRED)
+find_package(gRPC CONFIG REQUIRED)
+find_package(protobuf CONFIG REQUIRED)
+find_package(absl CONFIG REQUIRED)
 
-find_program(PROTOC_EXE NAMES protoc REQUIRED)
-find_program(GRPC_CPP_PLUGIN NAMES grpc_cpp_plugin REQUIRED)
+set(_PROTOBUF_PROTOC $<TARGET_FILE:protobuf::protoc>)
+set(_GRPC_CPP_PLUGIN_EXECUTABLE $<TARGET_FILE:gRPC::grpc_cpp_plugin>)
 
 set(PROTO_OUT ${CMAKE_BINARY_DIR}/proto)
 file(MAKE_DIRECTORY ${PROTO_OUT})
 
-set(PROTO_FILE ${CMAKE_CURRENT_SOURCE_DIR}/proto/exchange.proto)
+get_filename_component(PROTO_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../proto/exchange.proto" ABSOLUTE)
+get_filename_component(PROTO_PATH "${PROTO_FILE}" PATH)
+
 set(PROTO_SRCS ${PROTO_OUT}/exchange.pb.cc)
 set(PROTO_HDRS ${PROTO_OUT}/exchange.pb.h)
 set(GRPC_SRCS ${PROTO_OUT}/exchange.grpc.pb.cc)
@@ -53,10 +57,23 @@ add_custom_command(
          ${PROTO_HDRS}
          ${GRPC_SRCS}
          ${GRPC_HDRS}
-  COMMAND ${PROTOC_EXE} ARGS --grpc_out=${PROTO_OUT} --cpp_out=${PROTO_OUT}
-          --plugin=protoc-gen-grpc=${GRPC_CPP_PLUGIN} -I${CMAKE_CURRENT_SOURCE_DIR}/proto ${PROTO_FILE}
+  COMMAND ${_PROTOBUF_PROTOC} ARGS --grpc_out=${PROTO_OUT} --cpp_out=${PROTO_OUT}
+          --plugin=protoc-gen-grpc=${_GRPC_CPP_PLUGIN_EXECUTABLE} -I${PROTO_PATH} ${PROTO_FILE}
   DEPENDS ${PROTO_FILE}
   COMMENT "Generating gRPC/protobuf C++ files")
+
+add_library(
+  exchange_proto
+  ${PROTO_SRCS}
+  ${PROTO_HDRS}
+  ${GRPC_SRCS}
+  ${GRPC_HDRS})
+target_include_directories(exchange_proto PUBLIC ${PROTO_OUT})
+target_link_libraries(
+  exchange_proto
+  absl::absl_log
+  gRPC::grpc++
+  protobuf::libprotobuf)
 
 set(ORDERBOOK_SOURCES src/orderbook.cpp src/order.cpp src/exchange.cpp)
 
@@ -93,18 +110,13 @@ target_link_options(
 enable_testing()
 add_test(NAME OrderBookTests COMMAND OrderBookTests)
 
-add_executable(
-  MatchingEngineServer
-  src/grpc_server.cpp
-  src/main_server.cpp
-  ${ORDERBOOK_SOURCES}
-  ${PROTO_SRCS}
-  ${GRPC_SRCS})
+add_executable(MatchingEngineServer src/grpc_server.cpp src/main_server.cpp ${ORDERBOOK_SOURCES})
 
-target_include_directories(MatchingEngineServer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${PROTO_OUT})
+target_include_directories(MatchingEngineServer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 target_link_libraries(
   MatchingEngineServer
+  exchange_proto
   gRPC::grpc++
   protobuf::libprotobuf
   Threads::Threads)
