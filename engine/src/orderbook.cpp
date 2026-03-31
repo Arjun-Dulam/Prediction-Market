@@ -1,8 +1,8 @@
+#include "../include/orderbook.hpp"
+
 #include <iterator>
 #include <mutex>
-
-#include "../include/orderbook.hpp"
-#define COMPACTION_RATIO 0.15
+#define COMPACTION_RATIO 0.75
 
 using std::thread;
 
