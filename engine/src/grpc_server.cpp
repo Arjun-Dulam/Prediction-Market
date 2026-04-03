@@ -2,6 +2,10 @@
 #include <grpcpp/support/status.h>
 
 #include <cstdint>
+#include <iostream>
+#include <memory>
+#include <ostream>
+#include <string>
 
 #include "../include/exchange.hpp"
 #include "exchange.grpc.pb.h"
@@ -15,6 +19,8 @@ using exchange_comms::OrderID;
 using exchange_comms::OrderSubmission;
 using exchange_comms::Price;
 using exchange_comms::Symbol;
+using grpc::Server;
+using grpc::ServerBuilder;
 using grpc::ServerContext;
 using grpc::Status;
 
@@ -104,3 +110,17 @@ class MatchingEngineServiceImpl final
     return Status::OK;
   }
 };
+
+void RunServer() {
+  std::string server_address("0.0.0.0:50051");
+  Exchange exchange;
+  MatchingEngineServiceImpl service(exchange);
+
+  ServerBuilder builder;
+  builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
+  builder.RegisterService(&service);
+
+  std::unique_ptr<Server> server(builder.BuildAndStart());
+  std::cout << "Server listening on" << server_address << std::endl;
+  server->Wait();
+}
