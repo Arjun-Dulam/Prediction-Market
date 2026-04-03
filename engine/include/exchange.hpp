@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
@@ -38,7 +39,7 @@ class Exchange {
    * @param symbol the symbol corresponding to the order
    * @param order the order to be executed/added to orderbook
    */
-  bool add_order(std::string symbol, Order& Order);
+  uint32_t add_order(std::string symbol, Order& Order);
 
   /**
    * @brief Method meant to be called upon by clients, not other methods. This
@@ -59,4 +60,6 @@ class Exchange {
   int32_t get_best_ask(std::string symbol) const;
 
   int32_t get_last_trade_price(std::string) const;
+
+  struct SYMBOL_NOT_FOUND : public std::exception {};
 };

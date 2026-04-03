@@ -39,9 +39,11 @@ message OrderID {
   uint32 order_id = 1;
 }
 
+message BookVoid {}
+
 service MatchingEngine {
-  rpc AddBook(Symbol) returns (Boolean); 
-  rpc RemoveBook(Symbol) returns (Boolean); 
+  rpc AddBook(Symbol) returns (BookVoid); 
+  rpc RemoveBook(Symbol) returns (BookVoid); 
   rpc AddOrder(OrderSubmission) returns (OrderID);
   rpc RemoveOrder(OrderDeletion) returns (Boolean);
   rpc GetBestBid(Symbol) returns (Price); 
