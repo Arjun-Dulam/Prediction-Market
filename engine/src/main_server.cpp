@@ -1,1 +1,6 @@
-int main() { return 0; }
+#include "../include/grpc_server.hpp"
+
+int main() {
+  RunServer();
+  return 0;
+}
