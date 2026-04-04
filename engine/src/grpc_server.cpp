@@ -8,6 +8,7 @@
 #include <string>
 
 #include "../include/exchange.hpp"
+#include "../include/grpc_server.hpp"
 #include "exchange.grpc.pb.h"
 #include "exchange.pb.h"
 
@@ -75,7 +76,7 @@ class MatchingEngineServiceImpl final
     int32_t best_bid;
     try {
       best_bid = exchange_.get_best_bid(symbol->symbol());
-    } catch (const SYMBOL_NOT_FOUND) {
+    } catch (const SYMBOL_NOT_FOUND&) {
       return Status(grpc::StatusCode::NOT_FOUND, "symbol not found");
     }
     reply->set_price(best_bid);
@@ -88,7 +89,7 @@ class MatchingEngineServiceImpl final
 
     try {
       best_ask = exchange_.get_best_ask(symbol->symbol());
-    } catch (const SYMBOL_NOT_FOUND) {
+    } catch (const SYMBOL_NOT_FOUND&) {
       return Status(grpc::StatusCode::NOT_FOUND, "symbol not found");
     }
 
@@ -102,7 +103,7 @@ class MatchingEngineServiceImpl final
 
     try {
       last_trade_price = exchange_.get_last_trade_price(symbol->symbol());
-    } catch (const SYMBOL_NOT_FOUND) {
+    } catch (const SYMBOL_NOT_FOUND&) {
       return Status(grpc::StatusCode::NOT_FOUND, "symbol not found");
     }
 
@@ -121,6 +122,6 @@ void RunServer() {
   builder.RegisterService(&service);
 
   std::unique_ptr<Server> server(builder.BuildAndStart());
-  std::cout << "Server listening on" << server_address << std::endl;
+  std::cout << "Server listening on " << server_address << std::endl;
   server->Wait();
 }
