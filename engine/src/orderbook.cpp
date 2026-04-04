@@ -1,7 +1,8 @@
-#include <iterator>
-
 #include "../include/orderbook.hpp"
-#define COMPACTION_RATIO 0.15
+
+#include <iterator>
+#include <mutex>
+#define COMPACTION_RATIO 0.75
 
 using std::thread;
 
@@ -11,9 +12,6 @@ OrderBook::~OrderBook() {
 }
 
 OrderBook::OrderBook() {
-  next_timestamp = 0;
-  next_trade_id = 0;
-  next_order_id = 0;
   order_lookup.reserve(15000000);
 
   worker_ = thread([this] {
@@ -26,9 +24,8 @@ OrderBook::OrderBook() {
 }
 
 void OrderBook::add_order(Order& new_order) {
-  new_order.timestamp = next_timestamp++;
-  new_order.order_id = next_order_id++;
-
+  new_order.timestamp = orderbook_timestamp++;
+  if (new_order.order_id == 0) new_order.order_id = next_order_id++;
   init_trades_with_order(new_order);
 
   // Add order to orderbook if order not completely satisfied
@@ -91,8 +88,6 @@ void OrderBook::init_trades_with_order(Order& order) {
         (order.side == Side::Buy) ? order.order_id : existing_order->order_id,
         (order.side == Side::Sell) ? order.order_id : existing_order->order_id};
 
-    next_trade_id++;
-
     order.quantity -= new_trade.quantity;
     existing_order->quantity -= new_trade.quantity;
     if (existing_order->quantity == 0) {
@@ -133,6 +128,7 @@ bool OrderBook::remove_order(uint32_t order_id) {
 const std::vector<Trade>& OrderBook::show_trades() const { return trades; }
 
 int32_t OrderBook::get_last_trade_price() const {
+  std::lock_guard<std::mutex> lock(mutex_);
   if (trades.empty()) {
     return -1;
   }
@@ -140,6 +136,7 @@ int32_t OrderBook::get_last_trade_price() const {
 }
 
 int32_t OrderBook::get_best_ask() const {
+  std::lock_guard<std::mutex> lock(mutex_);
   if (asks.empty()) {
     return -1;
   }
@@ -147,6 +144,7 @@ int32_t OrderBook::get_best_ask() const {
 };
 
 int32_t OrderBook::get_best_bid() const {
+  std::lock_guard<std::mutex> lock(mutex_);
   if (bids.empty()) {
     return -1;
   }

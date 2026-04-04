@@ -1,11 +1,14 @@
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENGINE_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+RESULTS_DIR="$ENGINE_DIR/benchmarks/results"
+BENCHMARK_BIN="$ENGINE_DIR/../build/engine/OrderBookBenchmark"
+
 RATIOS=(0.15 0.25 0.35 0.45 0.55 0.65 0.75 0.85 0.95)
-OUTPUT_FILE="benchmark_results/results/compaction_ratios_run4"
-CPP_FILE="src/orderbook.cpp"
-BUILD_DIR="build"
-# TODO: Mention this in the readme
-# Create output directory if it doesn't exist
+OUTPUT_FILE="$RESULTS_DIR/compaction_ratios_run4"
+CPP_FILE="$ENGINE_DIR/src/orderbook.cpp"
+
 mkdir -p "$(dirname "$OUTPUT_FILE")"
 
 echo "Starting Compaction Study - $(date)" > "$OUTPUT_FILE"
@@ -25,11 +28,11 @@ do
 
     # Rebuild
     echo "Rebuilding..." | tee -a "$OUTPUT_FILE"
-    cmake --build "$BUILD_DIR" --config Release > /dev/null 2>&1
+    cmake --build "$ENGINE_DIR/../build" --config Release > /dev/null 2>&1
 
     # Run benchmarks
     echo "Running benchmarks..." | tee -a "$OUTPUT_FILE"
-    "$BUILD_DIR"/OrderBookBenchmark >> "$OUTPUT_FILE" 2>&1
+    "$BENCHMARK_BIN" >> "$OUTPUT_FILE" 2>&1
 
     echo "" >> "$OUTPUT_FILE"
 done
@@ -37,7 +40,7 @@ done
 # Restore original ratio
 echo "Restoring original ratio: $ORIGINAL_RATIO" | tee -a "$OUTPUT_FILE"
 sed -i '' "s/#define COMPACTION_RATIO.*/#define COMPACTION_RATIO $ORIGINAL_RATIO/" "$CPP_FILE"
-cmake --build "$BUILD_DIR" --config Release > /dev/null 2>&1
+cmake --build "$ENGINE_DIR/../build" --config Release > /dev/null 2>&1
 
 echo "========================================" | tee -a "$OUTPUT_FILE"
 echo "Study complete! Results: $OUTPUT_FILE" | tee -a "$OUTPUT_FILE"
