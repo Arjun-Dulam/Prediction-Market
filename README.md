@@ -9,9 +9,9 @@ Prediction-Market-Exchange/
 ├── CMakeLists.txt
 ├── README.md
 ├── CLAUDE.md
-├── build/                          # generated locally (cmake -B build .)
+├── build
 ├── proto/
-│   └── exchange.proto              # shared gRPC service definition
+│   └── exchange.proto
 ├── docs/
 │   ├── dev-log.md
 │   ├── engine-notes.md
@@ -39,4 +39,16 @@ Prediction-Market-Exchange/
     │       └── compaction_ratios.sh
     └── tests/
         └── test.cpp
+```
+
+## How to Compile?
+
+From the repository root:
+
+```bash
+cmake -S . -b build
+```
+
+```bash
+cmake --build build
 ```
