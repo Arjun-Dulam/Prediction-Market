@@ -7,16 +7,16 @@
 #include "gtest/gtest.h"
 
 TEST(OrderTest, ConstructorInitializesFields) {
-  Order order(10000, 100, Side::Buy, false);
+  Order order(10000, 100, Side::Buy);
 
   EXPECT_EQ(order.price, 10000);
   EXPECT_EQ(order.quantity, 100);
   EXPECT_EQ(order.side, Side::Buy);
-  EXPECT_FALSE(order.deleted_or_filled);
+  EXPECT_FALSE(order.get_tombstone());
 }
 
 TEST(OrderTest, SellOrderConstruction) {
-  Order order(9500, 50, Side::Sell, false);
+  Order order(9500, 50, Side::Sell);
 
   EXPECT_EQ(order.price, 9500);
   EXPECT_EQ(order.quantity, 50);
@@ -24,7 +24,7 @@ TEST(OrderTest, SellOrderConstruction) {
 }
 
 TEST(OrderTest, NegativePriceSupported) {
-  Order order(-3700, 1000, Side::Sell, false);
+  Order order(-3700, 1000, Side::Sell);
 
   EXPECT_EQ(order.price, -3700);
 }
@@ -49,7 +49,7 @@ class OrderBookTest : public ::testing::Test {
 };
 
 TEST_F(OrderBookTest, AddBuyOrderToEmptyBook_NoMatch) {
-  Order buy(10000, 100, Side::Buy, false);
+  Order buy(10000, 100, Side::Buy);
   book.add_order(buy);
   const auto& trades = book.show_trades();
   EXPECT_TRUE(trades.empty());
@@ -57,7 +57,7 @@ TEST_F(OrderBookTest, AddBuyOrderToEmptyBook_NoMatch) {
 }
 
 TEST_F(OrderBookTest, AddSellOrderToEmptyBook_NoMatch) {
-  Order sell(10000, 100, Side::Sell, false);
+  Order sell(10000, 100, Side::Sell);
   book.add_order(sell);
   const auto& trades = book.show_trades();
   EXPECT_TRUE(trades.empty());
@@ -65,9 +65,9 @@ TEST_F(OrderBookTest, AddSellOrderToEmptyBook_NoMatch) {
 }
 
 TEST_F(OrderBookTest, OrderIdsAreUnique) {
-  Order o1(10000, 100, Side::Buy, false);
-  Order o2(10100, 100, Side::Buy, false);
-  Order o3(9900, 100, Side::Sell, false);
+  Order o1(10000, 100, Side::Buy);
+  Order o2(10100, 100, Side::Buy);
+  Order o3(9900, 100, Side::Sell);
 
   book.add_order(o1);
   book.add_order(o2);
@@ -79,8 +79,8 @@ TEST_F(OrderBookTest, OrderIdsAreUnique) {
 }
 
 TEST_F(OrderBookTest, TimestampsAreIncreasing) {
-  Order o1(10000, 100, Side::Buy, false);
-  Order o2(10100, 100, Side::Buy, false);
+  Order o1(10000, 100, Side::Buy);
+  Order o2(10100, 100, Side::Buy);
 
   book.add_order(o1);
   book.add_order(o2);
@@ -89,10 +89,10 @@ TEST_F(OrderBookTest, TimestampsAreIncreasing) {
 }
 
 TEST_F(OrderBookTest, BuyMatchesBestAsk) {
-  Order sell(10000, 50, Side::Sell, false);
+  Order sell(10000, 50, Side::Sell);
   book.add_order(sell);
 
-  Order buy(10000, 50, Side::Buy, false);
+  Order buy(10000, 50, Side::Buy);
   book.add_order(buy);
   const auto& trades = book.show_trades();
 
@@ -104,10 +104,10 @@ TEST_F(OrderBookTest, BuyMatchesBestAsk) {
 }
 
 TEST_F(OrderBookTest, SellMatchesBestBid) {
-  Order buy(10000, 50, Side::Buy, false);
+  Order buy(10000, 50, Side::Buy);
   book.add_order(buy);
 
-  Order sell(10000, 50, Side::Sell, false);
+  Order sell(10000, 50, Side::Sell);
   book.add_order(sell);
   const auto& trades = book.show_trades();
 
@@ -117,10 +117,10 @@ TEST_F(OrderBookTest, SellMatchesBestBid) {
 }
 
 TEST_F(OrderBookTest, BuyMatchesLowerAsk) {
-  Order sell(9900, 50, Side::Sell, false);
+  Order sell(9900, 50, Side::Sell);
   book.add_order(sell);
 
-  Order buy(10000, 50, Side::Buy, false);
+  Order buy(10000, 50, Side::Buy);
   book.add_order(buy);
   const auto& trades = book.show_trades();
 
@@ -129,10 +129,10 @@ TEST_F(OrderBookTest, BuyMatchesLowerAsk) {
 }
 
 TEST_F(OrderBookTest, SellMatchesHigherBid) {
-  Order buy(10100, 50, Side::Buy, false);
+  Order buy(10100, 50, Side::Buy);
   book.add_order(buy);
 
-  Order sell(10000, 50, Side::Sell, false);
+  Order sell(10000, 50, Side::Sell);
   book.add_order(sell);
   const auto& trades = book.show_trades();
 
@@ -141,10 +141,10 @@ TEST_F(OrderBookTest, SellMatchesHigherBid) {
 }
 
 TEST_F(OrderBookTest, NoMatchWhenPricesDontOverlap) {
-  Order sell(10100, 50, Side::Sell, false);
+  Order sell(10100, 50, Side::Sell);
   book.add_order(sell);
 
-  Order buy(10000, 50, Side::Buy, false);
+  Order buy(10000, 50, Side::Buy);
   book.add_order(buy);
   const auto& trades = book.show_trades();
 
@@ -152,10 +152,10 @@ TEST_F(OrderBookTest, NoMatchWhenPricesDontOverlap) {
 }
 
 TEST_F(OrderBookTest, PartialFillBuyOrder) {
-  Order sell(10000, 30, Side::Sell, false);
+  Order sell(10000, 30, Side::Sell);
   book.add_order(sell);
 
-  Order buy(10000, 50, Side::Buy, false);
+  Order buy(10000, 50, Side::Buy);
   book.add_order(buy);
   const auto& trades = book.show_trades();
 
@@ -165,10 +165,10 @@ TEST_F(OrderBookTest, PartialFillBuyOrder) {
 }
 
 TEST_F(OrderBookTest, PartialFillSellOrder) {
-  Order buy(10000, 30, Side::Buy, false);
+  Order buy(10000, 30, Side::Buy);
   book.add_order(buy);
 
-  Order sell(10000, 50, Side::Sell, false);
+  Order sell(10000, 50, Side::Sell);
   book.add_order(sell);
   const auto& trades = book.show_trades();
 
@@ -178,14 +178,14 @@ TEST_F(OrderBookTest, PartialFillSellOrder) {
 }
 
 TEST_F(OrderBookTest, MultipleFillsInOneOrder) {
-  Order sell1(9900, 20, Side::Sell, false);
-  Order sell2(10000, 30, Side::Sell, false);
-  Order sell3(10100, 50, Side::Sell, false);
+  Order sell1(9900, 20, Side::Sell);
+  Order sell2(10000, 30, Side::Sell);
+  Order sell3(10100, 50, Side::Sell);
   book.add_order(sell1);
   book.add_order(sell2);
   book.add_order(sell3);
 
-  Order buy(10100, 100, Side::Buy, false);
+  Order buy(10100, 100, Side::Buy);
   book.add_order(buy);
   const auto& trades = book.show_trades();
 
@@ -199,12 +199,12 @@ TEST_F(OrderBookTest, MultipleFillsInOneOrder) {
 }
 
 TEST_F(OrderBookTest, PriceTimePriority_SamePriceFIFO) {
-  Order sell1(10000, 50, Side::Sell, false);
-  Order sell2(10000, 50, Side::Sell, false);
+  Order sell1(10000, 50, Side::Sell);
+  Order sell2(10000, 50, Side::Sell);
   book.add_order(sell1);
   book.add_order(sell2);
 
-  Order buy(10000, 50, Side::Buy, false);
+  Order buy(10000, 50, Side::Buy);
   book.add_order(buy);
   const auto& trades = book.show_trades();
 
@@ -213,12 +213,12 @@ TEST_F(OrderBookTest, PriceTimePriority_SamePriceFIFO) {
 }
 
 TEST_F(OrderBookTest, PriceTimePriority_BetterPriceFirst) {
-  Order sell_expensive(10100, 50, Side::Sell, false);
-  Order sell_cheap(9900, 50, Side::Sell, false);
+  Order sell_expensive(10100, 50, Side::Sell);
+  Order sell_cheap(9900, 50, Side::Sell);
   book.add_order(sell_expensive);
   book.add_order(sell_cheap);
 
-  Order buy(10100, 50, Side::Buy, false);
+  Order buy(10100, 50, Side::Buy);
   book.add_order(buy);
   const auto& trades = book.show_trades();
 
@@ -228,7 +228,7 @@ TEST_F(OrderBookTest, PriceTimePriority_BetterPriceFirst) {
 }
 
 TEST_F(OrderBookTest, RemoveExistingOrderReturnsTrue) {
-  Order order(10000, 100, Side::Buy, false);
+  Order order(10000, 100, Side::Buy);
   book.add_order(order);
 
   EXPECT_TRUE(book.remove_order(order.get_order_id()));
@@ -239,11 +239,11 @@ TEST_F(OrderBookTest, RemoveNonExistentOrderReturnsFalse) {
 }
 
 TEST_F(OrderBookTest, RemovedOrderDoesNotMatch) {
-  Order sell(10000, 50, Side::Sell, false);
+  Order sell(10000, 50, Side::Sell);
   book.add_order(sell);
   book.remove_order(sell.get_order_id());
 
-  Order buy(10000, 50, Side::Buy, false);
+  Order buy(10000, 50, Side::Buy);
   book.add_order(buy);
   const auto& trades = book.show_trades();
 
@@ -251,14 +251,14 @@ TEST_F(OrderBookTest, RemovedOrderDoesNotMatch) {
 }
 
 TEST_F(OrderBookTest, RemoveOneOfMultipleSamePriceOrders) {
-  Order sell1(10000, 50, Side::Sell, false);
-  Order sell2(10000, 50, Side::Sell, false);
+  Order sell1(10000, 50, Side::Sell);
+  Order sell2(10000, 50, Side::Sell);
   book.add_order(sell1);
   book.add_order(sell2);
 
   book.remove_order(sell1.get_order_id());
 
-  Order buy(10000, 50, Side::Buy, false);
+  Order buy(10000, 50, Side::Buy);
   book.add_order(buy);
   const auto& trades = book.show_trades();
 
@@ -267,7 +267,7 @@ TEST_F(OrderBookTest, RemoveOneOfMultipleSamePriceOrders) {
 }
 
 TEST_F(OrderBookTest, DoubleRemoveReturnsFalse) {
-  Order order(10000, 100, Side::Buy, false);
+  Order order(10000, 100, Side::Buy);
   book.add_order(order);
 
   EXPECT_TRUE(book.remove_order(order.get_order_id()));
@@ -275,13 +275,13 @@ TEST_F(OrderBookTest, DoubleRemoveReturnsFalse) {
 }
 
 TEST_F(OrderBookTest, ShowTradesReturnsAllTrades) {
-  Order sell1(10000, 50, Side::Sell, false);
-  Order sell2(10100, 50, Side::Sell, false);
+  Order sell1(10000, 50, Side::Sell);
+  Order sell2(10100, 50, Side::Sell);
   book.add_order(sell1);
   book.add_order(sell2);
 
-  Order buy1(10000, 50, Side::Buy, false);
-  Order buy2(10100, 50, Side::Buy, false);
+  Order buy1(10000, 50, Side::Buy);
+  Order buy2(10100, 50, Side::Buy);
   book.add_order(buy1);
   book.add_order(buy2);
 
@@ -290,12 +290,12 @@ TEST_F(OrderBookTest, ShowTradesReturnsAllTrades) {
 }
 
 TEST_F(OrderBookTest, TradesRecordedCorrectly) {
-  Order sell1(10000, 50, Side::Sell, false);
-  Order sell2(10100, 50, Side::Sell, false);
+  Order sell1(10000, 50, Side::Sell);
+  Order sell2(10100, 50, Side::Sell);
   book.add_order(sell1);
   book.add_order(sell2);
 
-  Order buy(10100, 100, Side::Buy, false);
+  Order buy(10100, 100, Side::Buy);
   book.add_order(buy);
 
   const auto& trades = book.show_trades();
@@ -305,15 +305,15 @@ TEST_F(OrderBookTest, TradesRecordedCorrectly) {
 }
 
 TEST_F(OrderBookTest, CompactionRemovesDeletedOrders) {
-  Order sell1(10000, 50, Side::Sell, false);
-  Order sell2(10000, 50, Side::Sell, false);
+  Order sell1(10000, 50, Side::Sell);
+  Order sell2(10000, 50, Side::Sell);
   book.add_order(sell1);
   book.add_order(sell2);
 
   book.remove_order(sell1.get_order_id());
   book.compact_orderbook();
 
-  Order buy(10000, 50, Side::Buy, false);
+  Order buy(10000, 50, Side::Buy);
   book.add_order(buy);
   const auto& trades = book.show_trades();
 
@@ -322,9 +322,9 @@ TEST_F(OrderBookTest, CompactionRemovesDeletedOrders) {
 }
 
 TEST_F(OrderBookTest, OrderLookupWorksAfterCompaction) {
-  Order o1(10000, 50, Side::Buy, false);
-  Order o2(10000, 50, Side::Buy, false);
-  Order o3(10000, 50, Side::Buy, false);
+  Order o1(10000, 50, Side::Buy);
+  Order o2(10000, 50, Side::Buy);
+  Order o3(10000, 50, Side::Buy);
   book.add_order(o1);
   book.add_order(o2);
   book.add_order(o3);
@@ -338,8 +338,8 @@ TEST_F(OrderBookTest, OrderLookupWorksAfterCompaction) {
 
 TEST_F(OrderBookTest, MultipleCompactionCycles) {
   for (int i = 0; i < 3; ++i) {
-    Order o1(10000, 50, Side::Buy, false);
-    Order o2(10000, 50, Side::Buy, false);
+    Order o1(10000, 50, Side::Buy);
+    Order o2(10000, 50, Side::Buy);
     book.add_order(o1);
     book.add_order(o2);
 
@@ -361,10 +361,10 @@ TEST_F(OrderBookTest, CompactEmptyBookNoOp) {
 }
 
 TEST_F(OrderBookTest, NegativePriceMatching) {
-  Order sell(-100, 1000, Side::Sell, false);
+  Order sell(-100, 1000, Side::Sell);
   book.add_order(sell);
 
-  Order buy(-100, 1000, Side::Buy, false);
+  Order buy(-100, 1000, Side::Buy);
   book.add_order(buy);
   const auto& trades = book.show_trades();
 
@@ -373,10 +373,10 @@ TEST_F(OrderBookTest, NegativePriceMatching) {
 }
 
 TEST_F(OrderBookTest, LargeQuantityOrder) {
-  Order sell(10000, UINT32_MAX / 2, Side::Sell, false);
+  Order sell(10000, UINT32_MAX / 2, Side::Sell);
   book.add_order(sell);
 
-  Order buy(10000, 1000, Side::Buy, false);
+  Order buy(10000, 1000, Side::Buy);
   book.add_order(buy);
   const auto& trades = book.show_trades();
 
@@ -388,11 +388,11 @@ TEST_F(OrderBookTest, ManyOrdersSamePriceLevel) {
   std::vector<Order> sells;
   sells.reserve(100);
   for (int i = 0; i < 100; ++i) {
-    sells.emplace_back(10000, 10, Side::Sell, false);
+    sells.emplace_back(10000, 10, Side::Sell);
     book.add_order(sells.back());
   }
 
-  Order buy(10000, 1000, Side::Buy, false);
+  Order buy(10000, 1000, Side::Buy);
   book.add_order(buy);
   const auto& trades = book.show_trades();
 
@@ -407,8 +407,8 @@ TEST_F(OrderBookTest, ManyOrdersSamePriceLevel) {
 
 TEST_F(OrderBookTest, AlternatingBuySellNoMatches) {
   for (int i = 0; i < 10; ++i) {
-    Order buy(9000 + i * 10, 100, Side::Buy, false);
-    Order sell(11000 + i * 10, 100, Side::Sell, false);
+    Order buy(9000 + i * 10, 100, Side::Buy);
+    Order sell(11000 + i * 10, 100, Side::Sell);
 
     book.add_order(buy);
     book.add_order(sell);
@@ -417,10 +417,10 @@ TEST_F(OrderBookTest, AlternatingBuySellNoMatches) {
 }
 
 TEST_F(OrderBookTest, AggressorOrderQuantityUpdatedOnFullFill) {
-  Order sell(10000, 50, Side::Sell, false);
+  Order sell(10000, 50, Side::Sell);
   book.add_order(sell);
 
-  Order buy(10000, 50, Side::Buy, false);
+  Order buy(10000, 50, Side::Buy);
   book.add_order(buy);
   const auto& trades = book.show_trades();
 
@@ -429,10 +429,10 @@ TEST_F(OrderBookTest, AggressorOrderQuantityUpdatedOnFullFill) {
 }
 
 TEST_F(OrderBookTest, AggressorOrderQuantityUpdatedOnPartialFill) {
-  Order sell(10000, 100, Side::Sell, false);
+  Order sell(10000, 100, Side::Sell);
   book.add_order(sell);
 
-  Order buy(10000, 30, Side::Buy, false);
+  Order buy(10000, 30, Side::Buy);
   book.add_order(buy);
   const auto& trades = book.show_trades();
 
@@ -447,7 +447,7 @@ TEST_F(OrderBookTest, ManyOrdersWithRemovals) {
   order_ids.reserve(NUM_ORDERS);
 
   for (int i = 0; i < NUM_ORDERS; ++i) {
-    Order order(10000 + (i % 100), 100, Side::Buy, false);
+    Order order(10000 + (i % 100), 100, Side::Buy);
     book.add_order(order);
     order_ids.push_back(order.get_order_id());
   }
@@ -467,11 +467,11 @@ TEST_F(OrderBookTest, HighVolumeMatching) {
   const int NUM_ORDERS = 500;
 
   for (int i = 0; i < NUM_ORDERS; ++i) {
-    Order sell(10000 + i, 10, Side::Sell, false);
+    Order sell(10000 + i, 10, Side::Sell);
     book.add_order(sell);
   }
 
-  Order buy(10000 + NUM_ORDERS, 5000, Side::Buy, false);
+  Order buy(10000 + NUM_ORDERS, 5000, Side::Buy);
   book.add_order(buy);
   const auto& trades = book.show_trades();
 
@@ -486,12 +486,12 @@ class ExchangeTest : public ::testing::Test {
 TEST_F(ExchangeTest, AddBookAndRouteOrder) {
   exchange.add_book("AAPL");
 
-  Order buy(15000, 100, Side::Buy, false);
+  Order buy(15000, 100, Side::Buy);
   EXPECT_TRUE(exchange.add_order("AAPL", buy));
 }
 
 TEST_F(ExchangeTest, AddOrderToNonExistentSymbolReturnsFalse) {
-  Order buy(15000, 100, Side::Buy, false);
+  Order buy(15000, 100, Side::Buy);
   EXPECT_FALSE(exchange.add_order("FAKE", buy));
 }
 
@@ -502,12 +502,12 @@ TEST_F(ExchangeTest, RemoveOrderFromNonExistentSymbolReturnsFalse) {
 TEST_F(ExchangeTest, AddDuplicateBookIsNoOp) {
   exchange.add_book("AAPL");
 
-  Order sell(15000, 50, Side::Sell, false);
+  Order sell(15000, 50, Side::Sell);
   exchange.add_order("AAPL", sell);
 
   exchange.add_book("AAPL");
 
-  Order buy(15000, 50, Side::Buy, false);
+  Order buy(15000, 50, Side::Buy);
   EXPECT_TRUE(exchange.add_order("AAPL", buy));
 }
 
@@ -515,7 +515,7 @@ TEST_F(ExchangeTest, RemoveBookThenAddOrderReturnsFalse) {
   exchange.add_book("AAPL");
   exchange.remove_book("AAPL");
 
-  Order buy(15000, 100, Side::Buy, false);
+  Order buy(15000, 100, Side::Buy);
   EXPECT_FALSE(exchange.add_order("AAPL", buy));
 }
 
@@ -527,13 +527,13 @@ TEST_F(ExchangeTest, OrdersOnDifferentSymbolsDoNotMatch) {
   exchange.add_book("AAPL");
   exchange.add_book("GOOG");
 
-  Order sell(15000, 50, Side::Sell, false);
+  Order sell(15000, 50, Side::Sell);
   exchange.add_order("AAPL", sell);
 
-  Order buy(15000, 50, Side::Buy, false);
+  Order buy(15000, 50, Side::Buy);
   EXPECT_TRUE(exchange.add_order("GOOG", buy));
 
-  Order aapl_buy(15000, 50, Side::Buy, false);
+  Order aapl_buy(15000, 50, Side::Buy);
   EXPECT_TRUE(exchange.add_order("AAPL", aapl_buy));
 }
 
@@ -542,17 +542,17 @@ TEST_F(ExchangeTest, MultipleSymbolsIndependentMatching) {
   exchange.add_book("GOOG");
   exchange.add_book("MSFT");
 
-  Order aapl_sell(15000, 100, Side::Sell, false);
-  Order goog_sell(28000, 50, Side::Sell, false);
-  Order msft_sell(40000, 75, Side::Sell, false);
+  Order aapl_sell(15000, 100, Side::Sell);
+  Order goog_sell(28000, 50, Side::Sell);
+  Order msft_sell(40000, 75, Side::Sell);
 
   EXPECT_TRUE(exchange.add_order("AAPL", aapl_sell));
   EXPECT_TRUE(exchange.add_order("GOOG", goog_sell));
   EXPECT_TRUE(exchange.add_order("MSFT", msft_sell));
 
-  Order aapl_buy(15000, 100, Side::Buy, false);
-  Order goog_buy(28000, 50, Side::Buy, false);
-  Order msft_buy(40000, 75, Side::Buy, false);
+  Order aapl_buy(15000, 100, Side::Buy);
+  Order goog_buy(28000, 50, Side::Buy);
+  Order msft_buy(40000, 75, Side::Buy);
 
   EXPECT_TRUE(exchange.add_order("AAPL", aapl_buy));
   EXPECT_TRUE(exchange.add_order("GOOG", goog_buy));
@@ -563,7 +563,7 @@ TEST_F(ExchangeTest, RemoveOrderFromCorrectSymbol) {
   exchange.add_book("AAPL");
   exchange.add_book("GOOG");
 
-  Order aapl_order(15000, 100, Side::Buy, false);
+  Order aapl_order(15000, 100, Side::Buy);
   exchange.add_order("AAPL", aapl_order);
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
@@ -574,7 +574,7 @@ TEST_F(ExchangeTest, RemoveOrderFromCorrectSymbol) {
 TEST_F(ExchangeTest, RemoveOrderTwiceReturnsFalse) {
   exchange.add_book("AAPL");
 
-  Order order(15000, 100, Side::Buy, false);
+  Order order(15000, 100, Side::Buy);
   exchange.add_order("AAPL", order);
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
@@ -585,7 +585,7 @@ TEST_F(ExchangeTest, RemoveOrderTwiceReturnsFalse) {
 TEST_F(ExchangeTest, RemoveBookCleansUpOrders) {
   exchange.add_book("AAPL");
 
-  Order order(15000, 100, Side::Buy, false);
+  Order order(15000, 100, Side::Buy);
   exchange.add_order("AAPL", order);
 
   exchange.remove_book("AAPL");
@@ -597,13 +597,13 @@ TEST_F(ExchangeTest, RemoveBookCleansUpOrders) {
 TEST_F(ExchangeTest, ReAddBookAfterRemovalStartsFresh) {
   exchange.add_book("AAPL");
 
-  Order sell(15000, 50, Side::Sell, false);
+  Order sell(15000, 50, Side::Sell);
   exchange.add_order("AAPL", sell);
 
   exchange.remove_book("AAPL");
   exchange.add_book("AAPL");
 
-  Order buy(15000, 50, Side::Buy, false);
+  Order buy(15000, 50, Side::Buy);
   EXPECT_TRUE(exchange.add_order("AAPL", buy));
 }
 
@@ -615,7 +615,7 @@ TEST_F(ExchangeTest, ManySymbols) {
   }
 
   for (int i = 0; i < NUM_SYMBOLS; ++i) {
-    Order order(10000 + i, 100, Side::Buy, false);
+    Order order(10000 + i, 100, Side::Buy);
     EXPECT_TRUE(exchange.add_order("SYM" + std::to_string(i), order));
   }
 }
@@ -623,14 +623,14 @@ TEST_F(ExchangeTest, ManySymbols) {
 TEST_F(ExchangeTest, EmptySymbolName) {
   exchange.add_book("");
 
-  Order order(10000, 100, Side::Buy, false);
+  Order order(10000, 100, Side::Buy);
   EXPECT_TRUE(exchange.add_order("", order));
 }
 
 TEST_F(ExchangeTest, AddAndRemoveMultipleBooksRepeatedly) {
   for (int i = 0; i < 10; ++i) {
     exchange.add_book("AAPL");
-    Order order(15000, 100, Side::Sell, false);
+    Order order(15000, 100, Side::Sell);
     EXPECT_TRUE(exchange.add_order("AAPL", order));
     exchange.remove_book("AAPL");
     EXPECT_FALSE(exchange.add_order("AAPL", order));
@@ -641,13 +641,13 @@ TEST_F(ExchangeTest, OrderRoutedToCorrectBookProducesTrades) {
   exchange.add_book("AAPL");
   exchange.add_book("GOOG");
 
-  Order sell(15000, 50, Side::Sell, false);
+  Order sell(15000, 50, Side::Sell);
   exchange.add_order("AAPL", sell);
 
-  Order buy(15000, 50, Side::Buy, false);
+  Order buy(15000, 50, Side::Buy);
   EXPECT_TRUE(exchange.add_order("AAPL", buy));
 
-  Order buy2(15000, 50, Side::Buy, false);
+  Order buy2(15000, 50, Side::Buy);
   EXPECT_TRUE(exchange.add_order("AAPL", buy2));
 }
 
@@ -655,17 +655,17 @@ TEST_F(ExchangeTest, RemoveBookWhileOtherBooksUnaffected) {
   exchange.add_book("AAPL");
   exchange.add_book("GOOG");
 
-  Order aapl_sell(15000, 50, Side::Sell, false);
-  Order goog_sell(28000, 50, Side::Sell, false);
+  Order aapl_sell(15000, 50, Side::Sell);
+  Order goog_sell(28000, 50, Side::Sell);
   exchange.add_order("AAPL", aapl_sell);
   exchange.add_order("GOOG", goog_sell);
 
   exchange.remove_book("AAPL");
 
-  Order goog_buy(28000, 50, Side::Buy, false);
+  Order goog_buy(28000, 50, Side::Buy);
   EXPECT_TRUE(exchange.add_order("GOOG", goog_buy));
 
-  Order aapl_buy(15000, 50, Side::Buy, false);
+  Order aapl_buy(15000, 50, Side::Buy);
   EXPECT_FALSE(exchange.add_order("AAPL", aapl_buy));
 }
 

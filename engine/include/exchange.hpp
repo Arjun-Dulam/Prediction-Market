@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <cstring>
+#include <exception>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
@@ -12,6 +14,7 @@ class Exchange {
  private:
   std::unordered_map<std::string, std::unique_ptr<OrderBook>> symbol_map;
   mutable std::shared_mutex mutex_;
+  std::atomic<uint64_t> next_order_id = 1;
 
  public:
   Exchange();
@@ -36,12 +39,27 @@ class Exchange {
    * @param symbol the symbol corresponding to the order
    * @param order the order to be executed/added to orderbook
    */
-  bool add_order(std::string symbol, Order& Order);
+  uint32_t add_order(std::string symbol, Order& Order);
+
   /**
-   * Method meant to be called upon by clients, not other methods. This is not
-   * as optimized as the function that removes filled orders.
+   * @brief Method meant to be called upon by clients, not other methods. This
+   * is not as optimized as the function that removes filled orders.
    * @param symbol the symbol for the order to be manually removed
    * @param order_id the unique id for the order to be removed
    */
   bool remove_order(std::string symbol, uint32_t order_id);
+
+  /**
+   * @brief Call get_best_bid from the orderbook corresponding to the respective
+   * symbol.
+   * @return the return value from the orderbook function call
+   */
+
+  int32_t get_best_bid(std::string symbol) const;
+
+  int32_t get_best_ask(std::string symbol) const;
+
+  int32_t get_last_trade_price(std::string) const;
+
+  struct SYMBOL_NOT_FOUND : public std::exception {};
 };

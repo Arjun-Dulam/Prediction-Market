@@ -25,13 +25,12 @@ class OrderBook {
   std::unordered_map<uint32_t, OrderLocation>
       order_lookup;  // Mapping order id to order location
 
+  uint64_t orderbook_timestamp = 0;
+  uint32_t next_order_id = 0;
   std::vector<Trade> trades;
-  uint64_t next_timestamp;
-  uint32_t next_trade_id;
-  uint32_t next_order_id;
   size_t deleted_orders_count = 0;
   size_t total_orders_count = 0;
-  std::mutex mutex_;
+  mutable std::mutex mutex_;
 
   /**
    * @brief Executes possible trades given the addition of a new order.
@@ -83,10 +82,19 @@ class OrderBook {
    */
   const std::vector<Trade>& show_trades() const;
 
+  /**
+   * @brief Gets the price of the last executed trades
+   */
   int32_t get_last_trade_price() const;
 
+  /**
+   * @brief Gets the greatest bid price
+   */
   int32_t get_best_bid() const;
 
+  /**
+   * @brief Gets the lowest asking price
+   */
   int32_t get_best_ask() const;
 
   /**
