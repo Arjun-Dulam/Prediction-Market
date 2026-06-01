@@ -1,0 +1,7 @@
+.git
+build
+build-*
+go-backend/data
+go-backend/.env
+**/*.o
+**/*.a

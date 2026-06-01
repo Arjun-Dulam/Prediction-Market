@@ -34,6 +34,17 @@ docker-down:
 test:
 	@echo "Testing..."
 	@go test ./... -v
+
+# Benchmark the concurrent HTTP order gateway with a deterministic in-memory
+# engine. This measures API overhead only, not C++ matching or database I/O.
+benchmark-api:
+	@go test ./internal/server -run '^$$' -bench '^BenchmarkOrderSubmission$$' -benchmem -benchtime=2s
+
+benchmark-durable:
+	@go test ./internal/trading -run '^$$' -bench '^BenchmarkDurableOrderPlacement$$' -benchmem -benchtime=2s
+
+loadtest:
+	@go run ./cmd/loadtest -orders $${ORDERS:-1000} -concurrency $${CONCURRENCY:-16}
 # Integrations Tests for the application
 itest:
 	@echo "Running integration tests..."
@@ -61,4 +72,4 @@ watch:
             fi; \
         fi
 
-.PHONY: all build run test clean watch docker-run docker-down itest
+.PHONY: all build run test benchmark-api benchmark-durable loadtest clean watch docker-run docker-down itest
