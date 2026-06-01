@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package exchange_comms;
 
+option go_package = "go-backend/internal/engine/pb;enginepb";
+
 enum Side {
   SIDE_BUY = 0;
   SIDE_SELL = 1;
@@ -39,12 +41,24 @@ message OrderID {
   uint32 order_id = 1;
 }
 
+message TradeResult {
+  uint32 buy_order_id = 1;
+  uint32 sell_order_id = 2;
+  int32 price = 3;
+  uint32 quantity = 4;
+}
+
+message AddOrderResponse {
+  uint32 order_id = 1;
+  repeated TradeResult trades = 2;
+}
+
 message BookVoid {}
 
 service MatchingEngine {
   rpc AddBook(Symbol) returns (BookVoid); 
   rpc RemoveBook(Symbol) returns (BookVoid); 
-  rpc AddOrder(OrderSubmission) returns (OrderID);
+  rpc AddOrder(OrderSubmission) returns (AddOrderResponse);
   rpc RemoveOrder(OrderDeletion) returns (Boolean);
   rpc GetBestBid(Symbol) returns (Price); 
   rpc GetBestAsk(Symbol) returns (Price); 

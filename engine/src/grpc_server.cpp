@@ -16,7 +16,7 @@ using SYMBOL_NOT_FOUND = Exchange::SYMBOL_NOT_FOUND;
 using exchange_comms::BookVoid;
 using exchange_comms::Boolean;
 using exchange_comms::OrderDeletion;
-using exchange_comms::OrderID;
+using exchange_comms::AddOrderResponse;
 using exchange_comms::OrderSubmission;
 using exchange_comms::Price;
 using exchange_comms::Symbol;
@@ -54,10 +54,20 @@ class MatchingEngineServiceImpl final
 
   Status AddOrder(ServerContext* context,
                   const OrderSubmission* order_submission,
-                  OrderID* reply) override {
+                  AddOrderResponse* reply) override {
     Order local_order = to_engine_order(order_submission->order());
-    exchange_.add_order(order_submission->symbol(), local_order);
+    std::vector<Trade> trades;
+    if (exchange_.add_order(order_submission->symbol(), local_order, &trades) == 0) {
+      return Status(grpc::StatusCode::NOT_FOUND, "symbol not found");
+    }
     reply->set_order_id(local_order.get_order_id());
+    for (const auto& trade : trades) {
+      auto* result = reply->add_trades();
+      result->set_buy_order_id(trade.buy_order_id);
+      result->set_sell_order_id(trade.sell_order_id);
+      result->set_price(trade.price);
+      result->set_quantity(trade.quantity);
+    }
 
     return Status::OK;
   }

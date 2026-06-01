@@ -38,7 +38,7 @@ class OrderBook {
    * @param order Order that has recently been added
    * @param executed_trades Pointer to modifiable vector
    */
-  void init_trades_with_order(Order& order);
+  void init_trades_with_order(Order& order, std::vector<Trade>* executed_trades);
 
   /**
    * @brief removes filled orders from given map
@@ -56,9 +56,9 @@ class OrderBook {
   /**
    * @brief Adds order to order book, executes and returns possible trades
    * @param order Address of new order to be added to orderbook
-   * @return Vector containing trades executed upon new order addition
+   * @param executed_trades Optional destination for trades from this order.
    */
-  void add_order(Order& order);
+  void add_order(Order& order, std::vector<Trade>* executed_trades = nullptr);
 
   /**
    * @brief Scans and removes order if it exists, to be used by traders with no

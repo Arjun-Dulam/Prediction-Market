@@ -1,6 +1,6 @@
 services:
   psql_bp:
-    image: postgres:latest
+    image: postgres:17-alpine
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${BLUEPRINT_DB_DATABASE}
@@ -10,6 +10,65 @@ services:
       - "${BLUEPRINT_DB_PORT}:5432"
     volumes:
       - psql_volume_bp:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  engine:
+    build:
+      context: ..
+      dockerfile: engine/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "50051:50051"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: 8080
+      ENGINE_ADDR: engine:50051
+      REDIS_ADDR: redis:6379
+      JWT_SECRET: ${JWT_SECRET:-development-secret-change-me}
+      SNAPSHOT_INTERVAL: ${SNAPSHOT_INTERVAL:-30s}
+      BLUEPRINT_DB_HOST: psql_bp
+      BLUEPRINT_DB_PORT: 5432
+      BLUEPRINT_DB_DATABASE: ${BLUEPRINT_DB_DATABASE}
+      BLUEPRINT_DB_USERNAME: ${BLUEPRINT_DB_USERNAME}
+      BLUEPRINT_DB_PASSWORD: ${BLUEPRINT_DB_PASSWORD}
+      BLUEPRINT_DB_SCHEMA: ${BLUEPRINT_DB_SCHEMA:-public}
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - api_data:/app/data
+    depends_on:
+      psql_bp:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      engine:
+        condition: service_started
 
 volumes:
   psql_volume_bp:
+  api_data:
