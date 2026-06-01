@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, username TEXT UNIQUE NOT NULL, password_hash BYTEA NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS markets (id TEXT PRIMARY KEY, symbol TEXT UNIQUE NOT NULL, owner_id TEXT, status TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS balances (user_id TEXT PRIMARY KEY, cents BIGINT NOT NULL CHECK(cents >= 0));
+CREATE TABLE IF NOT EXISTS orders (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, market_id TEXT NOT NULL REFERENCES markets(id), side TEXT NOT NULL, engine_order_id BIGINT, engine_price SMALLINT NOT NULL, price SMALLINT NOT NULL CHECK(price BETWEEN 1 AND 99), quantity INT NOT NULL CHECK(quantity > 0), filled_quantity INT NOT NULL DEFAULT 0, status TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS positions (user_id TEXT NOT NULL, market_id TEXT NOT NULL REFERENCES markets(id), yes_shares BIGINT NOT NULL DEFAULT 0, no_shares BIGINT NOT NULL DEFAULT 0, PRIMARY KEY(user_id, market_id));
+CREATE TABLE IF NOT EXISTS trades (event_id TEXT PRIMARY KEY, sequence BIGINT NOT NULL, market_id TEXT NOT NULL REFERENCES markets(id), buy_order_id TEXT NOT NULL, sell_order_id TEXT NOT NULL, price SMALLINT NOT NULL, quantity INT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS order_events (event_id TEXT PRIMARY KEY, sequence BIGINT NOT NULL, event JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE INDEX IF NOT EXISTS orders_market_status ON orders(market_id,status);

@@ -1,6 +1,11 @@
 # Prediction Market Exchange
 
-A Polymarket-esque prediction market exchange.
+A durable binary-outcome exchange with a Go REST/WebSocket backend, C++
+price-time-priority matching engine over gRPC, PostgreSQL projections, Redis
+quote caching, deterministic recovery, and a reproducible Docker stack.
+
+See [go-backend/README.md](go-backend/README.md) for API examples, architecture,
+deployment instructions, and measured performance.
 
 ## Directory Structure
 
@@ -46,9 +51,16 @@ Prediction-Market-Exchange/
 From the repository root:
 
 ```bash
-cmake -S . -b build
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 ```
 
 ```bash
 cmake --build build
+```
+
+Or start the complete product:
+
+```bash
+cd go-backend
+docker compose up -d --build
 ```

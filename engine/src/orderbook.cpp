@@ -1,5 +1,6 @@
 #include "../include/orderbook.hpp"
 
+#include <algorithm>
 #include <iterator>
 #include <mutex>
 #define COMPACTION_RATIO 0.75
@@ -12,7 +13,9 @@ OrderBook::~OrderBook() {
 }
 
 OrderBook::OrderBook() {
-  order_lookup.reserve(15000000);
+  // Avoid multi-megabyte allocations for every newly created market. The map
+  // grows automatically for unusually deep books.
+  order_lookup.reserve(65536);
 
   worker_ = thread([this] {
     while (true) {
@@ -23,25 +26,28 @@ OrderBook::OrderBook() {
   });
 }
 
-void OrderBook::add_order(Order& new_order) {
+void OrderBook::add_order(Order& new_order, std::vector<Trade>* executed_trades) {
+  std::lock_guard<std::mutex> lock(mutex_);
   new_order.timestamp = orderbook_timestamp++;
   if (new_order.order_id == 0) new_order.order_id = next_order_id++;
-  init_trades_with_order(new_order);
+  init_trades_with_order(new_order, executed_trades);
 
   // Add order to orderbook if order not completely satisfied
 
-  auto& price_vector = (new_order.side == Side::Buy) ? bids[new_order.price]
-                                                     : asks[new_order.price];
-  price_vector.push_back(new_order);
-  size_t index = size(price_vector) - 1;
-  OrderLocation order_location{new_order.side, new_order.price, index};
-  order_lookup[new_order.order_id] = order_location;
-  total_orders_count++;
+  if (new_order.quantity > 0) {
+    auto& price_vector = (new_order.side == Side::Buy) ? bids[new_order.price]
+                                                       : asks[new_order.price];
+    price_vector.push_back(new_order);
+    size_t index = size(price_vector) - 1;
+    OrderLocation order_location{new_order.side, new_order.price, index};
+    order_lookup[new_order.order_id] = order_location;
+    total_orders_count++;
+  }
 
-  return;
 }
 
-void OrderBook::init_trades_with_order(Order& order) {
+void OrderBook::init_trades_with_order(Order& order,
+                                       std::vector<Trade>* executed_trades) {
   while (order.quantity > 0) {
     if (order.side == Side::Buy && asks.empty()) {
       return;
@@ -95,6 +101,9 @@ void OrderBook::init_trades_with_order(Order& order) {
     }
 
     trades.push_back(new_trade);
+    if (executed_trades != nullptr) {
+      executed_trades->push_back(new_trade);
+    }
   }
 }
 
@@ -110,6 +119,7 @@ void OrderBook::mark_order_deleted(Order* order) {
 }
 
 bool OrderBook::remove_order(uint32_t order_id) {
+  std::lock_guard<std::mutex> lock(mutex_);
   auto it = order_lookup.find(order_id);
   if (it == order_lookup.end()) {
     return false;
@@ -140,7 +150,10 @@ int32_t OrderBook::get_best_ask() const {
   if (asks.empty()) {
     return -1;
   }
-  return asks.begin()->first;
+  for (const auto& [price, orders] : asks) {
+    for (const auto& order : orders) if (!order.deleted_or_filled) return price;
+  }
+  return -1;
 };
 
 int32_t OrderBook::get_best_bid() const {
@@ -148,7 +161,10 @@ int32_t OrderBook::get_best_bid() const {
   if (bids.empty()) {
     return -1;
   }
-  return std::prev(bids.end())->first;
+  for (auto level = bids.rbegin(); level != bids.rend(); ++level) {
+    for (const auto& order : level->second) if (!order.deleted_or_filled) return level->first;
+  }
+  return -1;
 };
 
 void OrderBook::compact_orderbook() {
