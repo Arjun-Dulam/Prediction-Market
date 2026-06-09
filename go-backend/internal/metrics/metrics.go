@@ -3,6 +3,7 @@ package metrics
 import (
 	"fmt"
 	"net/http"
+	"runtime"
 	"sync/atomic"
 	"time"
 )
@@ -39,6 +40,11 @@ func (m *Registry) Snapshot()      { m.snapshots.Add(1) }
 
 func (m *Registry) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+	var memory runtime.MemStats
+	runtime.ReadMemStats(&memory)
+	_, _ = fmt.Fprintf(w, "# TYPE go_goroutines gauge\ngo_goroutines %d\n", runtime.NumGoroutine())
+	_, _ = fmt.Fprintf(w, "# TYPE go_heap_alloc_bytes gauge\ngo_heap_alloc_bytes %d\n", memory.HeapAlloc)
+	_, _ = fmt.Fprintf(w, "# TYPE go_heap_objects gauge\ngo_heap_objects %d\n", memory.HeapObjects)
 	requests := m.requests.Load()
 	seconds := float64(m.duration.Load()) / float64(time.Second)
 	_, _ = fmt.Fprintf(w, "# TYPE exchange_http_requests_total counter\nexchange_http_requests_total %d\n", requests)
