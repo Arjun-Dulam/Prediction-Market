@@ -47,6 +47,16 @@ const (
 )
 
 var ErrNotMarketOwner = errors.New("only the market owner can resolve it")
+var ErrRecoveryRequired = errors.New("durable state uncertain; restart API and engine to recover")
+
+const maxWALRecord = 64 * 1024 * 1024
+
+// A newline commits one complete business batch. Legacy single-event records
+// remain readable, but new writes never expose a prefix of a transaction.
+type walRecord struct {
+	Version int     `json:"version"`
+	Events  []Event `json:"events"`
+}
 
 type Market struct {
 	ID      string `json:"id"`
@@ -136,6 +146,7 @@ type Service struct {
 	balances     map[string]int64
 	positions    map[string]map[string]Position
 	sequence     uint64
+	failure      error
 }
 
 func New(wal string, engine Engine) (*Service, error) {
@@ -178,20 +189,19 @@ func (s *Service) appendMany(events []Event) error {
 		}
 		s.walFile = f
 	}
-	var batch bytes.Buffer
-	for _, e := range events {
-		b, err := json.Marshal(e)
-		if err != nil {
-			return err
-		}
-		batch.Write(b)
-		batch.WriteByte('\n')
-	}
-	n, err := s.walFile.Write(batch.Bytes())
+	b, err := json.Marshal(walRecord{Version: 1, Events: events})
 	if err != nil {
 		return err
 	}
-	if n != batch.Len() {
+	if len(b)+1 >= maxWALRecord {
+		return errors.New("WAL batch exceeds 64 MiB record limit")
+	}
+	b = append(b, '\n')
+	n, err := s.walFile.Write(b)
+	if err != nil {
+		return err
+	}
+	if n != len(b) {
 		return io.ErrShortWrite
 	}
 	if s.cfg.Sync {
@@ -203,22 +213,26 @@ func (s *Service) commit(ctx context.Context, e Event) error {
 	return s.commitMany(ctx, []Event{e})
 }
 func (s *Service) commitMany(ctx context.Context, events []Event) error {
+	if s.failure != nil {
+		return s.failure
+	}
 	for i := range events {
 		events[i] = s.next(events[i])
 	}
 	if err := s.appendMany(events); err != nil {
-		s.sequence -= uint64(len(events))
-		return err
+		// Write/Sync errors can leave a durable prefix. Do not reuse sequences or
+		// checkpoint an in-memory state that has fallen behind its WAL.
+		return s.fail(err)
 	}
 	if s.cfg.Projector != nil {
 		if batch, ok := s.cfg.Projector.(BatchProjector); ok {
 			if err := batch.ApplyBatch(ctx, events); err != nil {
-				return fmt.Errorf("project event batch: %w", err)
+				return s.fail(fmt.Errorf("project event batch: %w", err))
 			}
 		} else {
 			for _, e := range events {
 				if err := s.cfg.Projector.Apply(ctx, e); err != nil {
-					return fmt.Errorf("project event %d: %w", e.Sequence, err)
+					return s.fail(fmt.Errorf("project event %d: %w", e.Sequence, err))
 				}
 			}
 		}
@@ -257,6 +271,18 @@ func (s *Service) apply(e Event) {
 		s.balances[e.UserID] += e.Amount
 	}
 }
+
+// fail is called while holding the write lock. Recovery is deliberately a
+// restart operation: the engine may also be ahead of the durable account state.
+func (s *Service) fail(err error) error {
+	s.failure = fmt.Errorf("%w: %v", ErrRecoveryRequired, err)
+	return s.failure
+}
+func (s *Service) HealthError() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.failure
+}
 func (s *Service) replay() error {
 	f, err := os.Open(s.cfg.WALPath)
 	if errors.Is(err, os.ErrNotExist) {
@@ -266,38 +292,80 @@ func (s *Service) replay() error {
 		return err
 	}
 	defer f.Close()
-	info, err := f.Stat()
-	if err != nil {
-		return err
-	}
-	var offset int64
+	var validEnd int64
 	scan := bufio.NewScanner(f)
-	scan.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	scan.Buffer(make([]byte, 64*1024), maxWALRecord)
+	// Retain the newline so valid JSON without its commit delimiter is discarded,
+	// and offsets remain exact even for older CRLF records.
+	scan.Split(func(data []byte, atEOF bool) (int, []byte, error) {
+		if i := bytes.IndexByte(data, '\n'); i >= 0 {
+			return i + 1, data[:i+1], nil
+		}
+		if atEOF && len(data) > 0 {
+			return len(data), data, nil
+		}
+		return 0, nil, nil
+	})
+	var previous uint64
 	for scan.Scan() {
 		line := scan.Bytes()
-		offset += int64(len(line) + 1)
-		var e Event
-		if err := json.Unmarshal(line, &e); err != nil {
-			// A process can die between the final write and newline. Such a record
-			// was never acknowledged after fsync, so safely ignore only that tail.
-			if offset > info.Size() {
-				return nil
-			}
-			return fmt.Errorf("corrupt WAL: %w", err)
-		}
-		if e.ID == "" {
-			hash := sha256.Sum256(line)
-			e.ID = fmt.Sprintf("legacy-%x", hash[:16])
-		}
-		if e.Sequence <= s.sequence {
-			continue
-		}
-		if s.cfg.Projector != nil {
-			if err := s.cfg.Projector.Apply(context.Background(), e); err != nil {
+		if line[len(line)-1] != '\n' {
+			repair, err := os.OpenFile(s.cfg.WALPath, os.O_WRONLY, 0)
+			if err != nil {
 				return err
 			}
+			defer repair.Close()
+			if err = repair.Truncate(validEnd); err != nil {
+				return err
+			}
+			return repair.Sync()
 		}
-		s.apply(e)
+		var record walRecord
+		if err := json.Unmarshal(line, &record); err != nil {
+			return fmt.Errorf("corrupt WAL at byte %d: %w", validEnd, err)
+		}
+		if record.Version == 0 {
+			var e Event
+			if err := json.Unmarshal(line, &e); err != nil {
+				return err
+			}
+			if e.ID == "" {
+				hash := sha256.Sum256(bytes.TrimSpace(line))
+				e.ID = fmt.Sprintf("legacy-%x", hash[:16])
+			}
+			record.Events = []Event{e}
+		} else if record.Version != 1 || len(record.Events) == 0 {
+			return fmt.Errorf("invalid WAL batch at byte %d", validEnd)
+		}
+		pending := make([]Event, 0, len(record.Events))
+		for _, e := range record.Events {
+			if e.Sequence <= previous {
+				return fmt.Errorf("non-increasing WAL sequence at byte %d", validEnd)
+			}
+			previous = e.Sequence
+			if e.Sequence > s.sequence {
+				pending = append(pending, e)
+			}
+		}
+		if len(pending) > 0 {
+			if s.cfg.Projector != nil {
+				if batch, ok := s.cfg.Projector.(BatchProjector); ok {
+					if err := batch.ApplyBatch(context.Background(), pending); err != nil {
+						return err
+					}
+				} else {
+					for _, e := range pending {
+						if err := s.cfg.Projector.Apply(context.Background(), e); err != nil {
+							return err
+						}
+					}
+				}
+			}
+			for _, e := range pending {
+				s.apply(e)
+			}
+		}
+		validEnd += int64(len(line))
 	}
 	return scan.Err()
 }
@@ -309,6 +377,9 @@ func (s *Service) CreateMarket(id, symbol string) error {
 func (s *Service) CreateMarketFor(id, symbol, ownerID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.failure != nil {
+		return s.failure
+	}
 	if id == "" || symbol == "" {
 		return errors.New("id and symbol are required")
 	}
@@ -331,6 +402,9 @@ func (s *Service) Deposit(user string, cents int64) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.failure != nil {
+		return s.failure
+	}
 	return s.commit(context.Background(), Event{Type: EventBalance, UserID: user, Amount: cents})
 }
 func translate(side Side, price int) (int, string, error) {
@@ -353,6 +427,12 @@ func isBuy(side Side) bool { return side == BuyYes || side == BuyNo }
 func (s *Service) Place(ctx context.Context, o Order) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.failure != nil {
+		return s.failure
+	}
 	if o.ID == "" || o.UserID == "" || o.Quantity <= 0 {
 		return errors.New("id, user and positive quantity are required")
 	}
@@ -496,6 +576,12 @@ func (s *Service) fillEvents(staged map[string]Order, id string, qty, enginePric
 func (s *Service) Cancel(ctx context.Context, id, user string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.failure != nil {
+		return s.failure
+	}
 	o, ok := s.orders[id]
 	if !ok || o.UserID != user {
 		return errors.New("order not found")
@@ -538,6 +624,12 @@ func (s *Service) Resolve(ctx context.Context, id string, yes bool) error {
 func (s *Service) ResolveFor(ctx context.Context, id string, yes bool, ownerID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.failure != nil {
+		return s.failure
+	}
 	m, ok := s.markets[id]
 	if !ok || m.Status != Open {
 		return errors.New("market is not open")
@@ -608,6 +700,12 @@ func (s *Service) ResolveFor(ctx context.Context, id string, yes bool, ownerID s
 func (s *Service) RecoverEngine(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.failure != nil {
+		return s.failure
+	}
 	if s.cfg.Engine == nil {
 		return nil
 	}
@@ -625,6 +723,11 @@ func (s *Service) RecoverEngine(ctx context.Context) error {
 		}
 	}
 	sort.Slice(orders, func(i, j int) bool { return orders[i].Sequence < orders[j].Sequence })
+	s.engineOrders = map[uint32]string{}
+	for _, o := range orders {
+		o.EngineID = 0
+		s.orders[o.ID] = o
+	}
 	for _, o := range orders {
 		m := s.markets[o.MarketID]
 		result, err := s.cfg.Engine.AddOrder(ctx, m.Symbol, int32(o.EnginePrice), uint32(o.Quantity-o.FilledQuantity), o.EngineSide)
@@ -632,7 +735,11 @@ func (s *Service) RecoverEngine(ctx context.Context) error {
 			return err
 		}
 		o.EngineID = result.OrderID
-		o.Status = Open
+		if o.FilledQuantity > 0 {
+			o.Status = Partial
+		} else {
+			o.Status = Open
+		}
 		if err := s.commit(ctx, Event{Type: EventOrder, Order: o}); err != nil {
 			return err
 		}
@@ -675,8 +782,11 @@ func (s *Service) Markets() []Market {
 	return markets
 }
 func (s *Service) Snapshot() error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.failure != nil {
+		return s.failure
+	}
 	if s.cfg.SnapshotPath == "" {
 		return errors.New("snapshot path not configured")
 	}
