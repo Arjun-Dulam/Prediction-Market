@@ -1,3 +1,5 @@
+// loadtest is a closed-loop, synthetic authenticated HTTP workload. Setup and
+// accounting verification are outside the measured order-placement interval.
 package main
 
 import (
@@ -8,124 +10,379 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"runtime"
 	"sort"
+	"strconv"
+	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
-
-func main() {
-	base := flag.String("base", "http://localhost:8080", "API base URL")
-	orders := flag.Int("orders", 1000, "total orders (rounded down to an even number)")
-	concurrency := flag.Int("concurrency", 16, "concurrent clients")
-	flag.Parse()
-	if *orders < 2 || *concurrency < 1 {
-		fmt.Fprintln(os.Stderr, "orders must be >= 2 and concurrency must be >= 1")
-		os.Exit(2)
-	}
-	*orders -= *orders % 2
-
-	client := &http.Client{Timeout: 15 * time.Second, Transport: &http.Transport{MaxIdleConns: *concurrency * 2, MaxIdleConnsPerHost: *concurrency * 2}}
-	stamp := time.Now().UnixNano()
-	market, symbol := fmt.Sprintf("load-%d", stamp), fmt.Sprintf("LOAD_%d", stamp)
-	yes := register(client, *base, fmt.Sprintf("yes-%d@example.com", stamp), fmt.Sprintf("yes-%d", stamp))
-	no := register(client, *base, fmt.Sprintf("no-%d@example.com", stamp), fmt.Sprintf("no-%d", stamp))
-	mustPost(client, *base+"/api/v1/markets", yes.Token, map[string]any{"id": market, "symbol": symbol}, http.StatusCreated)
-	for _, user := range []identity{yes, no} {
-		mustPost(client, *base+"/api/v1/balances/deposit", user.Token, map[string]any{"cents": int64(*orders * 100)}, http.StatusNoContent)
-	}
-
-	jobs := make(chan int)
-	latencies := make([]time.Duration, *orders)
-	var failures atomic.Int64
-	var wg sync.WaitGroup
-	start := time.Now()
-	for worker := 0; worker < *concurrency; worker++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := range jobs {
-				side, user := "buy_yes", yes
-				if i%2 == 1 {
-					side, user = "buy_no", no
-				}
-				payload := map[string]any{"id": fmt.Sprintf("load-order-%d-%d", stamp, i), "market_id": market, "side": side, "price": 50, "quantity": 1}
-				body, _ := json.Marshal(payload)
-				t0 := time.Now()
-				request, _ := http.NewRequest(http.MethodPost, *base+"/api/v1/trading/orders", bytes.NewReader(body))
-				request.Header.Set("Content-Type", "application/json")
-				request.Header.Set("Authorization", "Bearer "+user.Token)
-				resp, err := client.Do(request)
-				latencies[i] = time.Since(t0)
-				if err != nil {
-					failures.Add(1)
-					continue
-				}
-				_, _ = io.Copy(io.Discard, resp.Body)
-				resp.Body.Close()
-				if resp.StatusCode != http.StatusCreated {
-					failures.Add(1)
-				}
-			}
-		}()
-	}
-	for i := 0; i < *orders; i++ {
-		jobs <- i
-	}
-	close(jobs)
-	wg.Wait()
-	elapsed := time.Since(start)
-	sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
-	fmt.Printf("orders=%d concurrency=%d failures=%d throughput=%.1f orders/sec p50=%s p95=%s p99=%s elapsed=%s\n",
-		*orders, *concurrency, failures.Load(), float64(*orders)/elapsed.Seconds(), percentile(latencies, 50), percentile(latencies, 95), percentile(latencies, 99), elapsed.Round(time.Millisecond))
-	if failures.Load() != 0 {
-		os.Exit(1)
-	}
-}
 
 type identity struct {
 	ID    string `json:"user_id"`
 	Token string `json:"token"`
 }
-
-func register(client *http.Client, base, email, username string) identity {
-	body, _ := json.Marshal(map[string]string{"email": email, "username": username, "password": "benchmark-password"})
-	resp, err := client.Post(base+"/api/v1/users/register", "application/json", bytes.NewReader(body))
-	if err != nil || resp.StatusCode != http.StatusCreated {
-		fmt.Fprintf(os.Stderr, "register: response=%v error=%v\n", resp, err)
-		os.Exit(1)
-	}
-	defer resp.Body.Close()
-	var user identity
-	if json.NewDecoder(resp.Body).Decode(&user) != nil || user.Token == "" {
-		fmt.Fprintln(os.Stderr, "register: invalid response")
-		os.Exit(1)
-	}
-	return user
+type order struct {
+	ID       string `json:"id"`
+	Market   string `json:"market_id"`
+	Side     string `json:"side"`
+	Price    int    `json:"price"`
+	Quantity int    `json:"quantity"`
+}
+type metricSample struct {
+	Seconds float64 `json:"seconds"`
+	Metrics string  `json:"metrics"`
+}
+type result struct {
+	Market                string         `json:"market_id"`
+	UserIDs               []string       `json:"user_ids"`
+	MetricsSamples        []metricSample `json:"metrics_samples,omitempty"`
+	Label                 string         `json:"label"`
+	Environment           string         `json:"environment"`
+	Client                string         `json:"client"`
+	Started               time.Time      `json:"started_utc"`
+	Repeat                int            `json:"repeat"`
+	Concurrency           int            `json:"concurrency"`
+	Orders                int            `json:"orders"`
+	DurationSeconds       float64        `json:"duration_seconds"`
+	TargetDurationSeconds float64        `json:"target_duration_seconds"`
+	Successful            int            `json:"successful"`
+	Failures              int            `json:"failures"`
+	ErrorRate             float64        `json:"error_rate"`
+	Throughput            float64        `json:"successful_orders_per_second"`
+	AttemptedThroughput   float64        `json:"attempted_orders_per_second"`
+	P50                   float64        `json:"p50_ms"`
+	P95                   float64        `json:"p95_ms"`
+	P99                   float64        `json:"p99_ms"`
+	Statuses              map[string]int `json:"statuses"`
+	Errors                []string       `json:"error_samples,omitempty"`
+	Verified              bool           `json:"accounting_verified"`
+	VerificationError     string         `json:"verification_error,omitempty"`
+	MetricsBefore         string         `json:"metrics_before,omitempty"`
+	MetricsAfter          string         `json:"metrics_after,omitempty"`
+	Windows               []window       `json:"windows"`
+}
+type sample struct {
+	latency time.Duration
+	end     time.Duration
+	status  string
+	err     string
+}
+type window struct {
+	Start      float64 `json:"start_seconds"`
+	Duration   float64 `json:"duration_seconds"`
+	Orders     int     `json:"orders"`
+	Failures   int     `json:"failures"`
+	Throughput float64 `json:"successful_orders_per_second"`
+	P99        float64 `json:"p99_ms"`
 }
 
-func mustPost(client *http.Client, url, token string, payload any, want int) {
-	body, _ := json.Marshal(payload)
-	request, _ := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer "+token)
-	resp, err := client.Do(request)
+func main() {
+	base := flag.String("base", "http://localhost:8080", "API base URL")
+	orders := flag.Int("orders", 5000, "even order count per run (ignored with -duration)")
+	concurrency := flag.Int("concurrency", 32, "clients, unless -levels is set")
+	levels := flag.String("levels", "", "comma-separated client counts, e.g. 1,8,32,64")
+	repeats := flag.Int("repeats", 1, "runs per concurrency level")
+	duration := flag.Duration("duration", 0, "submit for this duration, then drain outstanding requests")
+	label := flag.String("label", "local", "baseline or improved build label")
+	environment := flag.String("environment", "unspecified", "hardware, Docker resources, server configuration")
+	flag.Parse()
+	counts, err := parseLevels(*levels, *concurrency)
+	if err != nil || *orders < 2 || *orders%2 != 0 || *repeats < 1 || *duration < 0 {
+		fmt.Fprintln(os.Stderr, "require even orders >= 2, positive clients/repeats, nonnegative duration:", err)
+		os.Exit(2)
+	}
+	failed := false
+	for repeat := 1; repeat <= *repeats; repeat++ {
+		for _, count := range counts {
+			r, err := run(strings.TrimRight(*base, "/"), *orders, count, *duration)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "setup:", err)
+				os.Exit(1)
+			}
+			r.Repeat, r.Label, r.Environment = repeat, *label, *environment
+			r.Client = runtime.Version() + " " + runtime.GOOS + "/" + runtime.GOARCH
+			if err := json.NewEncoder(os.Stdout).Encode(r); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			if r.Failures > 0 || !r.Verified {
+				failed = true
+			}
+		}
+	}
+	if failed {
+		os.Exit(1)
+	}
+}
+func parseLevels(s string, fallback int) ([]int, error) {
+	if s == "" {
+		s = strconv.Itoa(fallback)
+	}
+	var counts []int
+	for _, part := range strings.Split(s, ",") {
+		n, err := strconv.Atoi(strings.TrimSpace(part))
+		if err != nil || n < 1 {
+			return nil, fmt.Errorf("invalid concurrency %q", part)
+		}
+		counts = append(counts, n)
+	}
+	return counts, nil
+}
+func request(client *http.Client, method, url, token string, payload any, want int, out any) error {
+	var body io.Reader
+	if payload != nil {
+		b, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		body = bytes.NewReader(b)
+	}
+	req, err := http.NewRequest(method, url, body)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "setup %s: %v\n", url, err)
-		os.Exit(1)
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
 	}
 	defer resp.Body.Close()
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
 	if resp.StatusCode != want {
-		message, _ := io.ReadAll(resp.Body)
-		fmt.Fprintf(os.Stderr, "setup %s: got %s: %s\n", url, resp.Status, message)
-		os.Exit(1)
+		return fmt.Errorf("%s: status %d: %.200s", url, resp.StatusCode, b)
 	}
+	if out != nil {
+		return json.Unmarshal(b, out)
+	}
+	return nil
 }
-
-func percentile(values []time.Duration, p int) time.Duration {
-	index := (len(values)*p + 99) / 100
-	if index < 1 {
-		index = 1
+func run(base string, orders, concurrency int, duration time.Duration) (result, error) {
+	r := result{Concurrency: concurrency, TargetDurationSeconds: duration.Seconds(), Statuses: map[string]int{}}
+	transport := &http.Transport{MaxIdleConns: concurrency * 2, MaxIdleConnsPerHost: concurrency * 2}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Timeout: 15 * time.Second, Transport: transport}
+	stamp := strconv.FormatInt(time.Now().UnixNano(), 10)
+	market := "load-" + stamp
+	users := make([]identity, 2)
+	for i := range users {
+		name := fmt.Sprintf("load-%s-%d", stamp, i)
+		if err := request(client, "POST", base+"/api/v1/users/register", "", map[string]string{"email": name + "@example.com", "username": name, "password": "benchmark-password"}, 201, &users[i]); err != nil {
+			return r, err
+		}
+		if users[i].ID == "" || users[i].Token == "" {
+			return r, fmt.Errorf("invalid registration response")
+		}
 	}
-	return values[index-1]
+	if err := request(client, "POST", base+"/api/v1/markets", users[0].Token, map[string]string{"id": market, "symbol": "LOAD_" + stamp}, 201, nil); err != nil {
+		return r, err
+	}
+	funding := int64(orders) * 100
+	if duration > 0 {
+		funding = 1 << 50
+	}
+	for _, u := range users {
+		if err := request(client, "POST", base+"/api/v1/balances/deposit", u.Token, map[string]int64{"cents": funding}, 204, nil); err != nil {
+			return r, err
+		}
+	}
+	metrics := func() string {
+		var b strings.Builder
+		resp, err := client.Get(base + "/metrics")
+		if err != nil {
+			return ""
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			return ""
+		}
+		_, _ = io.Copy(&b, io.LimitReader(resp.Body, 65536))
+		return b.String()
+	}
+	r.Market = market
+	for _, u := range users {
+		r.UserIDs = append(r.UserIDs, u.ID)
+	}
+	r.MetricsBefore = metrics()
+	jobs := make(chan int)
+	samples := make([][]sample, concurrency)
+	var wg sync.WaitGroup
+	r.Started = time.Now().UTC()
+	start := time.Now()
+	monitorStop, monitorDone := make(chan struct{}), make(chan struct{})
+	if duration > 0 {
+		go func() {
+			defer close(monitorDone)
+			ticker := time.NewTicker(10 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					r.MetricsSamples = append(r.MetricsSamples, metricSample{Seconds: time.Since(start).Seconds(), Metrics: metrics()})
+				case <-monitorStop:
+					return
+				}
+			}
+		}()
+	} else {
+		close(monitorDone)
+	}
+	for w := 0; w < concurrency; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			for i := range jobs {
+				side := "buy_yes"
+				if i%2 == 1 {
+					side = "buy_no"
+				}
+				o := order{ID: fmt.Sprintf("load-order-%s-%d", stamp, i), Market: market, Side: side, Price: 50, Quantity: 1}
+				b, _ := json.Marshal(o)
+				req, _ := http.NewRequest("POST", base+"/api/v1/trading/orders", bytes.NewReader(b))
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("Authorization", "Bearer "+users[i%2].Token)
+				t0 := time.Now()
+				resp, err := client.Do(req)
+				status := "transport_error"
+				if err == nil {
+					status = strconv.Itoa(resp.StatusCode)
+					body, readErr := io.ReadAll(resp.Body)
+					resp.Body.Close()
+					if readErr != nil {
+						err = readErr
+					} else if resp.StatusCode != 201 {
+						err = fmt.Errorf("HTTP %d: %.200s", resp.StatusCode, body)
+					} else {
+						var got struct {
+							ID string `json:"order_id"`
+						}
+						if decodeErr := json.Unmarshal(body, &got); decodeErr != nil || got.ID != o.ID {
+							err = fmt.Errorf("invalid order acknowledgement")
+						}
+					}
+				}
+				// Includes body consumption and acknowledgement validation, unlike the old tool.
+				s := sample{latency: time.Since(t0), end: time.Since(start), status: status}
+				if err != nil {
+					s.err = err.Error()
+				}
+				samples[w] = append(samples[w], s)
+			}
+		}(w)
+	}
+	count := 0
+	for {
+		if duration == 0 && count >= orders || duration > 0 && time.Since(start) >= duration {
+			break
+		}
+		jobs <- count
+		jobs <- count + 1
+		count += 2
+	}
+	close(jobs)
+	wg.Wait()
+	elapsed := time.Since(start)
+	close(monitorStop)
+	<-monitorDone
+	r.Orders, r.DurationSeconds = count, elapsed.Seconds()
+	var all []sample
+	var latencies []time.Duration
+	for _, ss := range samples {
+		for _, s := range ss {
+			all = append(all, s)
+			latencies = append(latencies, s.latency)
+			r.Statuses[s.status]++
+			if s.err != "" {
+				r.Failures++
+				if len(r.Errors) < 5 {
+					r.Errors = append(r.Errors, s.err)
+				}
+			}
+		}
+	}
+	r.Successful = count - r.Failures
+	r.ErrorRate = float64(r.Failures) / float64(count)
+	r.Throughput = float64(r.Successful) / elapsed.Seconds()
+	r.AttemptedThroughput = float64(count) / elapsed.Seconds()
+	sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
+	r.P50, r.P95, r.P99 = percentile(latencies, 50), percentile(latencies, 95), percentile(latencies, 99)
+	r.Windows = windows(all, elapsed, 10*time.Second)
+	r.MetricsAfter = metrics()
+	if r.Failures == 0 {
+		if err := verify(client, base, market, users, funding, count); err != nil {
+			r.VerificationError = err.Error()
+		} else {
+			r.Verified = true
+		}
+	}
+	return r, nil
+}
+func verify(client *http.Client, base, market string, users []identity, funding int64, count int) error {
+	for i, u := range users {
+		var balance struct {
+			Cents int64 `json:"cents"`
+		}
+		if err := request(client, "GET", base+"/api/v1/balances/"+u.ID, u.Token, nil, 200, &balance); err != nil {
+			return err
+		}
+		if balance.Cents != funding-int64(count/2)*50 {
+			return fmt.Errorf("account %d balance=%d, want %d", i, balance.Cents, funding-int64(count/2)*50)
+		}
+		var p struct {
+			Yes int `json:"yes"`
+			No  int `json:"no"`
+		}
+		if err := request(client, "GET", base+"/api/v1/positions/"+u.ID+"/"+market, u.Token, nil, 200, &p); err != nil {
+			return err
+		}
+		wantYes, wantNo := count/2, 0
+		if i == 1 {
+			wantYes, wantNo = 0, count/2
+		}
+		if p.Yes != wantYes || p.No != wantNo {
+			return fmt.Errorf("account %d position=%+v, want yes=%d no=%d", i, p, wantYes, wantNo)
+		}
+	}
+	return nil
+}
+func percentile(sorted []time.Duration, p int) float64 {
+	if len(sorted) == 0 {
+		return 0
+	}
+	return float64(sorted[(len(sorted)*p+99)/100-1]) / float64(time.Millisecond)
+}
+func windows(samples []sample, elapsed, width time.Duration) []window {
+	n := int((elapsed + width - 1) / width)
+	out := make([]window, n)
+	latencies := make([][]time.Duration, n)
+	for i := range out {
+		d := width
+		if elapsed-time.Duration(i)*width < d {
+			d = elapsed - time.Duration(i)*width
+		}
+		out[i] = window{Start: float64(i) * width.Seconds(), Duration: d.Seconds()}
+	}
+	for _, s := range samples {
+		i := int(s.end / width)
+		if i >= n {
+			i = n - 1
+		}
+		out[i].Orders++
+		if s.err != "" {
+			out[i].Failures++
+		}
+		latencies[i] = append(latencies[i], s.latency)
+	}
+	for i := range out {
+		sort.Slice(latencies[i], func(a, b int) bool { return latencies[i][a] < latencies[i][b] })
+		out[i].P99 = percentile(latencies[i], 99)
+		out[i].Throughput = float64(out[i].Orders-out[i].Failures) / out[i].Duration
+	}
+	return out
 }

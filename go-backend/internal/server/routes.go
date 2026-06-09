@@ -172,7 +172,11 @@ func (s *Server) durableOrderHandler(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
 	if err := s.trading.Place(ctx, trading.Order{ID: req.ID, UserID: req.UserID, MarketID: req.MarketID, Side: req.Side, Price: req.Price, Quantity: req.Quantity}); err != nil {
-		http.Error(w, err.Error(), 400)
+		status := http.StatusBadRequest
+		if errors.Is(err, trading.ErrRecoveryRequired) {
+			status = http.StatusServiceUnavailable
+		}
+		http.Error(w, err.Error(), status)
 		return
 	}
 	if s.metrics != nil {
@@ -444,6 +448,12 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 	databaseStatus := s.db.Health()
 	response := map[string]any{"status": "up", "database": databaseStatus}
 	healthy := databaseStatus["status"] == "up"
+	if s.trading != nil {
+		if err := s.trading.HealthError(); err != nil {
+			response["durability"] = map[string]string{"status": "down", "error": err.Error()}
+			healthy = false
+		}
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), time.Second)
 	defer cancel()
 	if s.quotes != nil {
