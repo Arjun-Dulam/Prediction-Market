@@ -1,0 +1,18 @@
+goos: darwin
+goarch: arm64
+pkg: go-backend/internal/server
+cpu: Apple M3
+BenchmarkOrderSubmission-8   	  181686	     25763 ns/op	   11806 B/op	     130 allocs/op
+BenchmarkOrderSubmission-8   	   67269	     40255 ns/op	   11886 B/op	     130 allocs/op
+BenchmarkOrderSubmission-8   	   55309	     40165 ns/op	   11949 B/op	     129 allocs/op
+PASS
+ok  	go-backend/internal/server	12.833s
+goos: darwin
+goarch: arm64
+pkg: go-backend/internal/trading
+cpu: Apple M3
+BenchmarkDurableOrderPlacement-8   	     380	   6494183 ns/op	    4523 B/op	      17 allocs/op
+BenchmarkDurableOrderPlacement-8   	     446	   5959636 ns/op	    4513 B/op	      17 allocs/op
+BenchmarkDurableOrderPlacement-8   	     445	   5769752 ns/op	    4516 B/op	      17 allocs/op
+PASS
+ok  	go-backend/internal/trading	11.581s

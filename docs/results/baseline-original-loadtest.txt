@@ -1,0 +1,12 @@
+orders=5000 concurrency=1 failures=0 throughput=546.7 orders/sec p50=1.731541ms p95=2.434375ms p99=4.58ms elapsed=9.145s
+orders=5000 concurrency=1 failures=0 throughput=360.0 orders/sec p50=2.369917ms p95=5.171084ms p99=9.617084ms elapsed=13.889s
+orders=5000 concurrency=1 failures=0 throughput=273.8 orders/sec p50=3.106917ms p95=6.962167ms p99=10.88225ms elapsed=18.262s
+orders=5000 concurrency=8 failures=0 throughput=322.5 orders/sec p50=22.810583ms p95=38.615042ms p99=47.460417ms elapsed=15.502s
+orders=5000 concurrency=8 failures=0 throughput=465.7 orders/sec p50=15.454625ms p95=24.37725ms p99=33.506083ms elapsed=10.737s
+orders=5000 concurrency=8 failures=0 throughput=536.3 orders/sec p50=13.079875ms p95=26.180375ms p99=31.841667ms elapsed=9.323s
+orders=5000 concurrency=32 failures=0 throughput=636.2 orders/sec p50=49.801208ms p95=56.477292ms p99=59.412166ms elapsed=7.86s
+orders=5000 concurrency=32 failures=0 throughput=638.2 orders/sec p50=48.994916ms p95=57.36675ms p99=61.88825ms elapsed=7.835s
+orders=5000 concurrency=32 failures=0 throughput=580.6 orders/sec p50=51.429625ms p95=64.968375ms p99=144.586375ms elapsed=8.612s
+orders=5000 concurrency=64 failures=0 throughput=665.3 orders/sec p50=95.315583ms p95=103.244625ms p99=106.070875ms elapsed=7.516s
+orders=5000 concurrency=64 failures=0 throughput=555.2 orders/sec p50=107.344833ms p95=147.957625ms p99=280.142ms elapsed=9.006s
+orders=5000 concurrency=64 failures=0 throughput=440.3 orders/sec p50=111.421125ms p95=316.486959ms p99=618.639167ms elapsed=11.356s

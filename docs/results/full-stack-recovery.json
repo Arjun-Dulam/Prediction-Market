@@ -1,0 +1,1 @@
+{"parallel_retries": 32, "crash": "SIGKILL API and C++ engine", "account_state_equal": true, "post_recovery_price_time_priority": true, "post_recovery_cancel": true, "postgres_matches_api": true}

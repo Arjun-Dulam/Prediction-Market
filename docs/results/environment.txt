@@ -1,0 +1,43 @@
+Measurement date: 2026-10-03 America/New_York (JSONL timestamps are UTC)
+Host: Apple M3, 8 CPU cores, 24 GiB RAM, macOS arm64
+Client: Go 1.27.1 darwin/arm64, loopback HTTP forwarded by Docker Desktop
+Docker Desktop: 4.93.0 (240920), Engine 29.8.1 linux/arm64
+Docker VM: 8 CPUs, 8,319,770,624 bytes RAM (~7.748 GiB), no per-container CPU/memory limits
+API image: golang:1.26-alpine build, alpine:3.23 runtime, CGO_ENABLED=0
+Matching server: Ubuntu 24.04, GCC 13, CMake Release (-O3 -DNDEBUG), no sanitizer
+Native C++ benchmark: AppleClang, Release, -O3 -march=native -DNDEBUG -flto
+Native tests: -O0 -g -fsanitize=address -fsanitize=undefined
+WAL: Docker named volume, Sync=true (fsync); snapshots every 30 seconds
+Database: PostgreSQL 17-alpine, default durability settings; Redis 7-alpine
+Database port: 15432; engine: 50051; API: 8080; Redis: 6379
+Compose project: pme-audit, fresh named volumes at the start of each measured sweep
+Each sweep retains state between runs; 3 rounds of clients 1,8,32,64, 5000 orders/run
+No order warmup; registration, funding and market setup precede each measured interval
+Synthetic order mix: two JWT-authenticated users; alternating buy_yes/buy_no,
+50 cents x 1 share, one new market per run, unique order IDs, no WebSocket subscribers
+Includes quote gRPC reads, Redis writes, and hub publication; excludes network fan-out to connected clients
+
+Baseline source commit: c7f5e66
+Improved measured source commit: d46a4f1
+Baseline API image: sha256:3295b45194b3fb5614fed095f7b1df64f5fb02340a945d80d15de20bc9bf51f6
+Baseline engine image: sha256:93df6deb9c8acf5a5385f5e632ed2b3d56910eea0191faaf559836c7bddb49fb
+PostgreSQL image digest: postgres@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+Redis image digest: redis@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+Image tags and package repositories are mutable. These digests and final-images.txt identify this run.
+The final comparison sweeps ran sequentially with no competing builds/tests. The final
+baseline sweep followed the improved sweep/soak with freshly reset volumes and the same
+client/engine. baseline-load-initial.jsonl is exploratory: short regression-test work
+was concurrent, and 70 requests failed with projection context deadlines. It is excluded
+from the final comparison. Original load/C++/Go baselines overlapped initial builds.
+Variability is reported, not hidden.
+ProductName:		macOS
+ProductVersion:		27.0.1
+BuildVersion:		26A434
+Apple clang version 21.0.0 (clang-2100.3.34.2)
+Target: arm64-apple-darwin27.0.0
+
+Final baseline rerun image: sha256:950859113663a022fdefd3bd7f675e772eeccb45d0691c0e1fcefac2468e9805
+API Go compiler verified from running binary via go version -m: go1.26.8 linux/arm64
+
+Focused final confirmation: fresh volumes, 3 x 5000 orders at concurrency 32 only;
+separate from the four-level sweep, so retained-state growth differs.
