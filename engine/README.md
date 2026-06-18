@@ -3,7 +3,9 @@
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://isocpp.org/)
 [![CMake](https://img.shields.io/badge/CMake-3.21+-green.svg)](https://cmake.org/)
 
-A high-performance matching engine for the Prediction Market Exchange, achieving **2.78 million orders per second** with matching.
+A C++20 price-time-priority matching engine for the Prediction Market Exchange.
+See [the systems audit](../docs/systems-audit.md) for repeated, hardware-qualified
+measurements and a clear distinction between in-process matching and HTTP orders.
 
 ---
 
@@ -90,7 +92,7 @@ This trades memory for latency—deleted orders occupy space temporarily but avo
 
 ## Performance
 
-### Benchmark Results
+### Historical Benchmark Results (unverified reference)
 
 | Metric | Value            |
 |--------|------------------|
@@ -105,7 +107,7 @@ Five benchmarks measure different aspects of performance:
 1. **BM_AddOrder_No_Match** — Insertion throughput without matching
 2. **BM_AddOrder_Latency** — Per-order latency distribution
 3. **BM_RemoveOrder_VaryDepth** — Cancellation performance at various depths
-4. **BM_MatchingPerformance** — Realistic trading simulation throughput
+4. **BM_MatchingPerformance** — Synthetic generated-stream matching throughput
 5. **BM_MatchingLatency** — Per-match latency distribution
 
 ---
@@ -150,7 +152,7 @@ BM_AddOrder_No_Match/1000    301 ns          301 ns      2325581    items_per_se
 ./build/engine/OrderBookTests
 ```
 
-39 unit tests covering:
+56 unit tests covering:
 - Order/Trade construction
 - Matching engine (partial fills, price-time priority, multi-level matching)
 - Order removal and lookup consistency
@@ -187,7 +189,7 @@ engine/
 - **Multithreading** — Synchronize across multiple orderbooks for different symbols.
 - **Memory Pooling** — Custom allocators to reduce allocation overhead and improve cache behavior
 - **Advanced Order Types** — Market Orders, Stop-Loss/Stop-Limit
-- **Network Layer** — gRPC for order submission over network.
+- **Failure semantics** — Deduplication for ambiguous gRPC outcomes; the existing server already accepts orders over gRPC.
 
 ---
 

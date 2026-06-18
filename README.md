@@ -7,44 +7,14 @@ quote caching, deterministic recovery, and a reproducible Docker stack.
 See [go-backend/README.md](go-backend/README.md) for API examples, architecture,
 deployment instructions, and measured performance.
 
-## Directory Structure
+## Systems audit and verified results
 
-```text
-Prediction-Market-Exchange/
-├── CMakeLists.txt
-├── README.md
-├── CLAUDE.md
-├── build
-├── proto/
-│   └── exchange.proto
-├── docs/
-│   ├── dev-log.md
-│   ├── engine-notes.md
-│   └── plan.md
-└── engine/
-    ├── CMakeLists.txt
-    ├── README.md
-    ├── include/
-    │   ├── exchange.hpp
-    │   ├── order.hpp
-    │   ├── orderbook.hpp
-    │   └── thread_queue.hpp
-    ├── src/
-    │   ├── exchange.cpp
-    │   ├── grpc_server.cpp
-    │   ├── main_server.cpp
-    │   ├── order.cpp
-    │   └── orderbook.cpp
-    ├── benchmarks/
-    │   ├── order_generator.cpp
-    │   ├── order_generator.hpp
-    │   ├── orderbook_bench.cpp
-    │   └── scripts/
-    │       ├── analyze_compaction_study.py
-    │       └── compaction_ratios.sh
-    └── tests/
-        └── test.cpp
-```
+See [docs/systems-audit.md](docs/systems-audit.md) for the architecture audit,
+WAL crash-recovery fixes, authenticated concurrency sweeps, two-minute soak,
+raw results, reproduction commands and verified resume bullet options.
+
+The load test checks accounting as well as HTTP success. Performance numbers
+are synthetic local measurements with hardware and variability recorded.
 
 ## How to Compile?
 

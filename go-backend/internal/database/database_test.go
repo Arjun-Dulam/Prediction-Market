@@ -3,7 +3,6 @@ package database
 import (
 	"context"
 	"log"
-	"os"
 	"testing"
 	"time"
 
@@ -60,12 +59,11 @@ func TestMain(m *testing.M) {
 		log.Fatalf("could not start postgres container: %v", err)
 	}
 
-	exitCode := m.Run()
+	m.Run()
 
 	if teardown != nil && teardown(context.Background()) != nil {
-		log.Fatal("could not teardown postgres container")
+		log.Fatalf("could not teardown postgres container: %v", err)
 	}
-	os.Exit(exitCode)
 }
 
 func TestNew(t *testing.T) {
