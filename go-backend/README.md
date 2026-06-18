@@ -95,30 +95,36 @@ Example:
 ## Verification and performance
 
 ```bash
-go test ./...
-make loadtest ORDERS=5000 CONCURRENCY=32
+go test -count=1 ./...
+go test -race -count=1 ./...
+go vet ./...
+make loadtest ORDERS=5000 LEVELS=1,8,32,64 REPEATS=3
+# Or build once and preserve JSONL:
+go build -o /tmp/pme-loadtest ./cmd/loadtest
+/tmp/pme-loadtest -orders 5000 -levels 1,8,32,64 -repeats 3 > /tmp/load.jsonl
+/tmp/pme-loadtest -duration 2m -concurrency 32 > /tmp/soak.jsonl
 ```
 
-The committed full-stack load generator registers and authenticates two users,
-creates a market, funds both accounts, and submits complementary orders through
-HTTP, JWT middleware, WAL/fsync, PostgreSQL, gRPC, C++, Redis, and WebSocket
-publication. On an Apple Silicon development machine via Docker Desktop, the
-three-run median for 5,000 orders at concurrency 32 was **595 orders/sec** with
-**53 ms p50, 58 ms p95, and 68 ms p99**, with zero failed requests. Treat these
-as local reference results and rerun them on the target host before quoting them.
+Start the Docker stack before load testing. The synthetic, closed-loop generator
+registers two users, authenticates orders with real JWTs, funds accounts and creates
+a market. It reports successful/attempted throughput, p50/p95/p99 through response
+validation, error rates, duration and order counts at each concurrency level.
+Every zero-error run checks exact cash/share accounting. Setup and verification are
+outside the measured interval. WebSocket publication is included without subscribers.
+Use `-environment` to describe the host and server configuration and `-label` to
+identify the build. Exit status is nonzero for order or accounting failures.
 
-The C++ benchmark uses a deterministic 15-million-order generated stream:
+See [the systems audit](../docs/systems-audit.md) for **verified before-and-after
+results**, committed raw data, configuration, restart checks and limitations.
+Historical claims of 595 HTTP orders/sec and 3.73M in-process C++ orders/sec
+should be reproduced before use; they are not guaranteed current results.
 
-```bash
-cmake -S .. -B ../build -DCMAKE_BUILD_TYPE=Release
-cmake --build ../build --target OrderBookBenchmark
-../build/engine/OrderBookBenchmark --benchmark_filter='BM_Matching(Performance|Latency)/0$'
-```
-
-The latest three-run median measured **3.73M orders/sec**, **125 ns p50**, and
-**1.29 us p99** for in-process matching. Returning per-order fills only allocates
-when a caller asks for them, and new books reserve a bounded initial lookup table
-rather than allocating capacity for 15 million orders per market.
+New WAL writes frame complete business event batches in a single versioned record.
+Replay discards and truncates an incomplete trailing record and rejects complete
+corrupt records. After a WAL/projection error, readiness and new orders fail until
+both API and engine are restarted. This prevents retries or snapshots from
+compounding uncertain state. Keep PostgreSQL and API volumes together: snapshots
+alone cannot recreate a lost PostgreSQL database after WAL truncation.
 
 The checked-in [OpenAPI contract](openapi.yaml) documents the public surface,
 and GitHub Actions runs Go race/static/integration checks, sanitizer-backed C++

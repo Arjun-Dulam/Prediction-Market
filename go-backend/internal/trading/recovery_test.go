@@ -419,3 +419,43 @@ func TestExpiredPlacementDoesNotWriteWAL(t *testing.T) {
 		t.Fatal("expired request created order")
 	}
 }
+
+func TestConcurrentCheckpointsAndDepositsRecoverExactBalance(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{WALPath: filepath.Join(dir, "wal"), SnapshotPath: filepath.Join(dir, "snapshot"), Sync: true}
+	s, err := NewWithConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for worker := 0; worker < 2; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 20; i++ {
+				if err := s.Snapshot(); err != nil {
+					t.Error(err)
+				}
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 50; i++ {
+			if err := s.Deposit("u", 1); err != nil {
+				t.Error(err)
+			}
+		}
+	}()
+	wg.Wait()
+	_ = s.Close()
+	recovered, err := NewWithConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer recovered.Close()
+	if recovered.Balance("u") != 50 {
+		t.Fatalf("checkpoint/replay balance=%d", recovered.Balance("u"))
+	}
+}

@@ -1,0 +1,24 @@
+Unable to determine clock rate from sysctl: hw.cpufrequency: No such file or directory
+This does not affect benchmark measurements, only the metadata output.
+***WARNING*** Failed to set thread affinity. Estimated CPU frequency may be incorrect.
+2026-10-03T21:21:48-04:00
+Running build-audit/engine/OrderBookBenchmark
+Run on (8 X 24 MHz CPU s)
+Load Average: 8.09, 6.59, 5.24
+------------------------------------------------------------------------------------------
+Benchmark                                Time             CPU   Iterations UserCounters...
+------------------------------------------------------------------------------------------
+BM_MatchingPerformance/0               378 ns          375 ns      6854949 items_per_second=2.66798M/s
+BM_MatchingPerformance/0               261 ns          260 ns      6854949 items_per_second=3.84024M/s
+BM_MatchingPerformance/0               195 ns          195 ns      6854949 items_per_second=5.13595M/s
+BM_MatchingPerformance/0_mean          278 ns          277 ns            3 items_per_second=3.88139M/s
+BM_MatchingPerformance/0_median        261 ns          260 ns            3 items_per_second=3.84024M/s
+BM_MatchingPerformance/0_stddev       92.6 ns         91.1 ns            3 items_per_second=1.2345M/s
+BM_MatchingPerformance/0_cv          33.34 %         32.95 %             3 items_per_second=31.81%
+BM_MatchingLatency/0                   873 ns          872 ns      9508157 items_per_second=1.14619M/s p50=166 p95=4.125k p99=8.167k p999=12.667k
+BM_MatchingLatency/0                   390 ns          390 ns      9508157 items_per_second=2.56405M/s p50=125 p95=1.833k p99=3.583k p999=7.834k
+BM_MatchingLatency/0                   224 ns          222 ns      9508157 items_per_second=4.49715M/s p50=125 p95=750 p99=1.708k p999=2.5k
+BM_MatchingLatency/0_mean              495 ns          495 ns            3 items_per_second=2.7358M/s p50=138.667 p95=2.236k p99=4.486k p999=7.667k
+BM_MatchingLatency/0_median            390 ns          390 ns            3 items_per_second=2.56405M/s p50=125 p95=1.833k p99=3.583k p999=7.834k
+BM_MatchingLatency/0_stddev            337 ns          338 ns            3 items_per_second=1.68207M/s p50=23.6714 p95=1.72321k p99=3.32283k p999=5.08556k
+BM_MatchingLatency/0_cv              68.03 %         68.19 %             3 items_per_second=61.48% p50=17.07% p95=77.07% p99=74.07% p999=66.33%
