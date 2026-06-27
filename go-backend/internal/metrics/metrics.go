@@ -2,13 +2,16 @@ package metrics
 
 import (
 	"fmt"
+	"go-backend/internal/trading"
 	"net/http"
 	"runtime"
 	"sync/atomic"
 	"time"
 )
 
+type stageSummary struct{ count, duration atomic.Uint64 }
 type Registry struct {
+	stages    [trading.StageCount]stageSummary
 	requests  atomic.Uint64
 	errors    atomic.Uint64
 	duration  atomic.Uint64
@@ -35,6 +38,10 @@ func (m *Registry) Middleware(next http.Handler) http.Handler {
 	})
 }
 
+func (m *Registry) Observe(stage trading.Stage, duration time.Duration) {
+	m.stages[stage].count.Add(1)
+	m.stages[stage].duration.Add(uint64(duration))
+}
 func (m *Registry) OrderAccepted() { m.orders.Add(1) }
 func (m *Registry) Snapshot()      { m.snapshots.Add(1) }
 
@@ -45,6 +52,11 @@ func (m *Registry) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	_, _ = fmt.Fprintf(w, "# TYPE go_goroutines gauge\ngo_goroutines %d\n", runtime.NumGoroutine())
 	_, _ = fmt.Fprintf(w, "# TYPE go_heap_alloc_bytes gauge\ngo_heap_alloc_bytes %d\n", memory.HeapAlloc)
 	_, _ = fmt.Fprintf(w, "# TYPE go_heap_objects gauge\ngo_heap_objects %d\n", memory.HeapObjects)
+	_, _ = fmt.Fprintln(w, "# TYPE exchange_stage_duration_seconds summary")
+	for stage := trading.Stage(0); stage < trading.StageCount; stage++ {
+		summary := &m.stages[stage]
+		_, _ = fmt.Fprintf(w, "exchange_stage_duration_seconds_count{stage=%q} %d\nexchange_stage_duration_seconds_sum{stage=%q} %.9f\n", stage.String(), summary.count.Load(), stage.String(), float64(summary.duration.Load())/float64(time.Second))
+	}
 	requests := m.requests.Load()
 	seconds := float64(m.duration.Load()) / float64(time.Second)
 	_, _ = fmt.Fprintf(w, "# TYPE exchange_http_requests_total counter\nexchange_http_requests_total %d\n", requests)
