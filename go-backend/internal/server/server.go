@@ -54,9 +54,10 @@ func NewServer() *http.Server {
 	if err != nil {
 		panic(fmt.Sprintf("initialize authentication: %v", err))
 	}
+	registry := metrics.New()
 	durable, err := trading.NewWithConfig(trading.Config{
 		WALPath: "data/orders.wal", SnapshotPath: "data/orderbook.snapshot",
-		Engine: engine.TradingAdapter{Client: matchingEngine}, Projector: projector, Sync: true,
+		Engine: engine.TradingAdapter{Client: matchingEngine}, Projector: projector, Sync: true, Observe: registry.Observe,
 	})
 	if err != nil {
 		panic(fmt.Sprintf("initialize durable state: %v", err))
@@ -74,7 +75,7 @@ func NewServer() *http.Server {
 		hub:     ws.NewHub(),
 		quotes:  cache.NewRedisQuotes(envOr("REDIS_ADDR", "localhost:6379")),
 		auth:    authService,
-		metrics: metrics.New(),
+		metrics: registry,
 	}
 	snapshotStop := make(chan struct{})
 	snapshotDone := make(chan struct{})

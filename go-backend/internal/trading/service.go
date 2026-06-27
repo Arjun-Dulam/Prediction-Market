@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -118,11 +119,29 @@ type Projector interface {
 type BatchProjector interface {
 	ApplyBatch(context.Context, []Event) error
 }
+
+// Stage names are fixed so instrumentation never creates per-user or per-market labels.
+type Stage int
+
+const (
+	StageLockWait Stage = iota
+	StageWAL
+	StageProjection
+	StageEngine
+	StageQuote
+	StageCount
+)
+
+func (s Stage) String() string {
+	return [...]string{"lock_wait", "wal", "projection", "engine", "quote"}[s]
+}
+
 type Config struct {
 	WALPath, SnapshotPath string
 	Engine                Engine
 	Projector             Projector
 	Sync                  bool
+	Observe               func(Stage, time.Duration)
 }
 type Position struct {
 	Yes int `json:"yes"`
@@ -219,26 +238,43 @@ func (s *Service) commitMany(ctx context.Context, events []Event) error {
 	for i := range events {
 		events[i] = s.next(events[i])
 	}
-	if err := s.appendMany(events); err != nil {
+	start := time.Now()
+	err := s.appendMany(events)
+	s.observe(StageWAL, start)
+	if err != nil {
 		// Write/Sync errors can leave a durable prefix. Do not reuse sequences or
 		// checkpoint an in-memory state that has fallen behind its WAL.
 		return s.fail(err)
 	}
 	if s.cfg.Projector != nil {
-		if batch, ok := s.cfg.Projector.(BatchProjector); ok {
-			if err := batch.ApplyBatch(ctx, events); err != nil {
-				return s.fail(fmt.Errorf("project event batch: %w", err))
-			}
-		} else {
-			for _, e := range events {
-				if err := s.cfg.Projector.Apply(ctx, e); err != nil {
-					return s.fail(fmt.Errorf("project event %d: %w", e.Sequence, err))
-				}
-			}
+		start := time.Now()
+		err := s.project(ctx, events)
+		s.observe(StageProjection, start)
+		if err != nil {
+			return s.fail(err)
 		}
 	}
 	for _, e := range events {
 		s.apply(e)
+	}
+	return nil
+}
+func (s *Service) observe(stage Stage, start time.Time) {
+	if s.cfg.Observe != nil {
+		s.cfg.Observe(stage, time.Since(start))
+	}
+}
+func (s *Service) project(ctx context.Context, events []Event) error {
+	if batch, ok := s.cfg.Projector.(BatchProjector); ok {
+		if err := batch.ApplyBatch(ctx, events); err != nil {
+			return fmt.Errorf("project event batch: %w", err)
+		}
+	} else {
+		for _, e := range events {
+			if err := s.cfg.Projector.Apply(ctx, e); err != nil {
+				return fmt.Errorf("project event %d: %w", e.Sequence, err)
+			}
+		}
 	}
 	return nil
 }
@@ -425,7 +461,9 @@ func translate(side Side, price int) (int, string, error) {
 }
 func isBuy(side Side) bool { return side == BuyYes || side == BuyNo }
 func (s *Service) Place(ctx context.Context, o Order) error {
+	start := time.Now()
 	s.mu.Lock()
+	s.observe(StageLockWait, start)
 	defer s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return err
@@ -485,7 +523,9 @@ func (s *Service) Place(ctx context.Context, o Order) error {
 		o.Status = Open
 		return s.commit(ctx, Event{Type: EventOrder, Order: o})
 	}
+	start = time.Now()
 	result, err := s.cfg.Engine.AddOrder(ctx, m.Symbol, int32(price), uint32(o.Quantity), engineSide)
+	s.observe(StageEngine, start)
 	if err != nil {
 		o.Status = Cancelled
 		refund := int64(0)
