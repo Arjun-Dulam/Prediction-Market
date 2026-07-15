@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -153,11 +154,41 @@ func TestPostgresProjectionIsAtomicAndIdempotent(t *testing.T) {
 			t.Fatalf("duplicate credit: %d", balance)
 		}
 	})
+	t.Run("cancellation inside native transaction rolls back and returns pool", func(t *testing.T) {
+		db.SetMaxOpenConns(2)
+		locker, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer locker.Rollback()
+		if _, err = locker.ExecContext(ctx, `SELECT cents FROM balances WHERE user_id='u' FOR UPDATE`); err != nil {
+			t.Fatal(err)
+		}
+		blocked, stop := context.WithTimeout(ctx, 50*time.Millisecond)
+		defer stop()
+		credit := trading.Event{ID: "blocked-credit", Sequence: 14, Type: trading.EventBalance, UserID: "u", Amount: 11}
+		if err = projector.Apply(blocked, credit); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("expected blocked transaction deadline, got %v", err)
+		}
+		if err = locker.Rollback(); err != nil {
+			t.Fatal(err)
+		}
+		if err = projector.Apply(ctx, credit); err != nil {
+			t.Fatal(err)
+		}
+		if err = db.QueryRowContext(ctx, `SELECT cents FROM balances WHERE user_id='u'`).Scan(&balance); err != nil {
+			t.Fatal(err)
+		}
+		if balance != 478 {
+			t.Fatalf("timed out debit applied twice: %d", balance)
+		}
+	})
+
 	t.Run("cancelled context leaves connection reusable", func(t *testing.T) {
 		db.SetMaxOpenConns(1)
 		cancelled, stop := context.WithCancel(ctx)
 		stop()
-		credit := trading.Event{ID: "cancelled-credit", Sequence: 14, Type: trading.EventBalance, UserID: "u", Amount: 11}
+		credit := trading.Event{ID: "cancelled-credit", Sequence: 15, Type: trading.EventBalance, UserID: "u", Amount: 11}
 		if err := projector.Apply(cancelled, credit); err == nil {
 			t.Fatal("cancelled operation succeeded")
 		}
@@ -167,7 +198,7 @@ func TestPostgresProjectionIsAtomicAndIdempotent(t *testing.T) {
 		if err := db.QueryRowContext(ctx, `SELECT cents FROM balances WHERE user_id='u'`).Scan(&balance); err != nil {
 			t.Fatal(err)
 		}
-		if balance != 478 {
+		if balance != 489 {
 			t.Fatalf("cancelled credit persisted: %d", balance)
 		}
 	})
