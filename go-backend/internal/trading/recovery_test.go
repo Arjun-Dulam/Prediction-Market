@@ -154,7 +154,7 @@ func TestProjectionFailureBlocksWritesAndCheckpointUntilRecovery(t *testing.T) {
 }
 func TestConcurrentIdempotentRetriesAcrossCheckpointAndReplay(t *testing.T) {
 	dir := t.TempDir()
-	cfg := Config{WALPath: filepath.Join(dir, "orders.wal"), SnapshotPath: filepath.Join(dir, "snapshot"), Sync: true}
+	cfg := Config{WALPath: filepath.Join(dir, "orders.wal"), SnapshotPath: filepath.Join(dir, "snapshot"), Sync: true, OrderBatchSize: 32}
 	s, err := NewWithConfig(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -278,7 +278,7 @@ func TestCrashHelper(t *testing.T) {
 	if dir == "" {
 		return
 	}
-	s, err := NewWithConfig(Config{WALPath: filepath.Join(dir, "wal"), SnapshotPath: filepath.Join(dir, "snapshot"), Sync: true})
+	s, err := NewWithConfig(Config{WALPath: filepath.Join(dir, "wal"), SnapshotPath: filepath.Join(dir, "snapshot"), Sync: true, OrderBatchSize: 32})
 	if err != nil {
 		t.Fatal(err)
 	}
