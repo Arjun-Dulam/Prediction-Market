@@ -129,11 +129,12 @@ const (
 	StageProjection
 	StageEngine
 	StageQuote
+	StageSnapshotPause
 	StageCount
 )
 
 func (s Stage) String() string {
-	return [...]string{"lock_wait", "wal", "projection", "engine", "quote"}[s]
+	return [...]string{"lock_wait", "wal", "projection", "engine", "quote", "snapshot_pause"}[s]
 }
 
 type Config struct {
@@ -160,6 +161,7 @@ type snapshot struct {
 
 type Service struct {
 	mu           sync.RWMutex
+	snapshotMu   sync.Mutex
 	cfg          Config
 	walFile      *os.File
 	markets      map[string]Market
@@ -192,6 +194,9 @@ func NewWithConfig(cfg Config) (*Service, error) {
 			return nil, err
 		}
 	}
+	if err := s.replayFile(cfg.WALPath + ".previous"); err != nil {
+		return nil, err
+	}
 	if err := s.replay(); err != nil {
 		return nil, err
 	}
@@ -218,6 +223,11 @@ func (s *Service) appendMany(events []Event) error {
 			return err
 		}
 		s.walFile = f
+		if s.cfg.Sync {
+			if err := syncDirectory(filepath.Dir(s.cfg.WALPath)); err != nil {
+				return err
+			}
+		}
 	}
 	b, err := json.Marshal(walRecord{Version: 1, Events: events})
 	if err != nil {
@@ -330,8 +340,9 @@ func (s *Service) HealthError() error {
 	defer s.mu.RUnlock()
 	return s.failure
 }
-func (s *Service) replay() error {
-	f, err := os.Open(s.cfg.WALPath)
+func (s *Service) replay() error { return s.replayFile(s.cfg.WALPath) }
+func (s *Service) replayFile(path string) error {
+	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -357,7 +368,7 @@ func (s *Service) replay() error {
 	for scan.Scan() {
 		line := scan.Bytes()
 		if line[len(line)-1] != '\n' {
-			repair, err := os.OpenFile(s.cfg.WALPath, os.O_WRONLY, 0)
+			repair, err := os.OpenFile(path, os.O_WRONLY, 0)
 			if err != nil {
 				return err
 			}
@@ -836,64 +847,6 @@ func (s *Service) Markets() []Market {
 	sort.Slice(markets, func(i, j int) bool { return markets[i].ID < markets[j].ID })
 	return markets
 }
-func (s *Service) Snapshot() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.failure != nil {
-		return s.failure
-	}
-	if s.cfg.SnapshotPath == "" {
-		return errors.New("snapshot path not configured")
-	}
-	state := snapshot{Sequence: s.sequence, Markets: s.markets, Orders: s.orders, Balances: s.balances, Positions: s.positions}
-	b, err := json.Marshal(state)
-	if err != nil {
-		return err
-	}
-	if err = os.MkdirAll(filepath.Dir(s.cfg.SnapshotPath), 0755); err != nil {
-		return err
-	}
-	tmp := s.cfg.SnapshotPath + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	if _, err = f.Write(b); err != nil {
-		_ = f.Close()
-		return err
-	}
-	if err = f.Sync(); err != nil {
-		_ = f.Close()
-		return err
-	}
-	if err = f.Close(); err != nil {
-		return err
-	}
-	if err = os.Rename(tmp, s.cfg.SnapshotPath); err != nil {
-		return err
-	}
-	directory, err := os.Open(filepath.Dir(s.cfg.SnapshotPath))
-	if err != nil {
-		return err
-	}
-	err = directory.Sync()
-	_ = directory.Close()
-	if err != nil {
-		return err
-	}
-	// The snapshot is now durable. Events through its sequence can be removed;
-	// a crash before this point would still have left the previous WAL intact.
-	if s.walFile != nil {
-		if err = s.walFile.Truncate(0); err != nil {
-			return err
-		}
-		return s.walFile.Sync()
-	}
-	if err = os.Truncate(s.cfg.WALPath, 0); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return nil
-}
 func (s *Service) loadSnapshot() error {
 	b, err := os.ReadFile(s.cfg.SnapshotPath)
 	if errors.Is(err, os.ErrNotExist) {
@@ -919,6 +872,8 @@ func (s *Service) Close() error {
 	s.closed = true
 	s.pendingMu.Unlock()
 	s.workers.Wait()
+	s.snapshotMu.Lock()
+	defer s.snapshotMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.walFile != nil {
