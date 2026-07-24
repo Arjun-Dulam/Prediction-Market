@@ -19,9 +19,11 @@ func TestPrometheusMetrics(t *testing.T) {
 	registry.Snapshot()
 	registry.Observe(trading.StageProjection, 2*time.Millisecond)
 	registry.Observe(trading.StageProjection, time.Millisecond)
+	registry.Observe(trading.StageSnapshotPause, 10*time.Millisecond)
+	registry.Observe(trading.StageSnapshotPause, time.Millisecond)
 	recorder := httptest.NewRecorder()
 	registry.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-	for _, metric := range []string{"exchange_http_requests_total 1", "exchange_http_errors_total 1", "exchange_orders_accepted_total 1", "exchange_snapshots_total 1", `exchange_stage_duration_seconds_count{stage="projection"} 2`, `exchange_stage_duration_seconds_sum{stage="projection"} 0.003000000`} {
+	for _, metric := range []string{"exchange_http_requests_total 1", "exchange_http_errors_total 1", "exchange_orders_accepted_total 1", "exchange_snapshots_total 1", "exchange_snapshot_pause_max_seconds 0.010000000", `exchange_stage_duration_seconds_count{stage="projection"} 2`, `exchange_stage_duration_seconds_sum{stage="projection"} 0.003000000`} {
 		if !strings.Contains(recorder.Body.String(), metric) {
 			t.Fatalf("missing %q in metrics:\n%s", metric, recorder.Body.String())
 		}
