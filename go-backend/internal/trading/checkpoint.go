@@ -77,6 +77,12 @@ func (s *Service) freezeCheckpoint() (snapshot, error) {
 	if err := os.Rename(s.cfg.WALPath, previous); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return snapshot{}, s.fail(err)
 	}
+	// Make the backup name durable before reusing the current WAL's pathname.
+	// A power failure may revert an unflushed rename; creating the replacement
+	// first could otherwise obscure the last durable segment.
+	if err := syncDirectory(filepath.Dir(s.cfg.WALPath)); err != nil {
+		return snapshot{}, s.fail(err)
+	}
 	file, err := os.OpenFile(s.cfg.WALPath, os.O_CREATE|os.O_EXCL|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		return snapshot{}, s.fail(err)

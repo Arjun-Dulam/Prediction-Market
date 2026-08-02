@@ -328,3 +328,33 @@ func TestCloseWaitsForInFlightCheckpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPersistenceFailureDuringCheckpointKeepsRecoveryLogs(t *testing.T) {
+	s := batchService(t, nil)
+	err := checkpointWithWriter(s, func(path string, state snapshot) error {
+		// A later transaction reaches the current WAL but fails SQL projection.
+		// Publishing the frozen, healthy prefix must not discard its recovery logs.
+		s.cfg.Projector = failingProjector{}
+		if err := s.Deposit("yes", 7); !errors.Is(err, ErrRecoveryRequired) {
+			return fmt.Errorf("expected persistence failure, got %v", err)
+		}
+		return writeSnapshot(path, state)
+	})
+	if !errors.Is(err, ErrRecoveryRequired) {
+		t.Fatalf("in-flight checkpoint ignored latched failure: %v", err)
+	}
+	if _, err = os.Stat(s.cfg.WALPath + ".previous"); err != nil {
+		t.Fatal("checkpoint discarded prefix during failure")
+	}
+	s.Close()
+	cfg := s.cfg
+	cfg.Projector = nil
+	recovered, err := NewWithConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer recovered.Close()
+	if recovered.Balance("yes") != 1007 {
+		t.Fatal("uncertain current WAL transaction was lost")
+	}
+}
