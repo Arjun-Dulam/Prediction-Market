@@ -70,7 +70,11 @@ func NewServer() *http.Server {
 	if err != nil {
 		panic(fmt.Sprintf("initialize durable state: %v", err))
 	}
-	if err := durable.RecoverEngine(ctx); err != nil {
+	// Replay may be longer than the earlier migration deadline. Give engine
+	// reconstruction its own timeout after durable recovery has finished.
+	recoveryCtx, recoveryCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer recoveryCancel()
+	if err := durable.RecoverEngine(recoveryCtx); err != nil {
 		_ = durable.Close()
 		panic(fmt.Sprintf("recover matching engine state: %v", err))
 	}
