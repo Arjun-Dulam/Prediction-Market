@@ -7,7 +7,12 @@ quote caching, deterministic recovery, and a reproducible Docker stack.
 See [go-backend/README.md](go-backend/README.md) for API examples, architecture,
 deployment instructions, and measured performance.
 
-## Systems audit and verified results
+## Systems audit and verified performance
+
+See [the performance report](docs/performance-optimization.md) for the measured
+807 → 2,678 authenticated orders/s improvement at 64 clients (3.3×), with fsync
+and synchronous PostgreSQL accounting retained. It includes repeated concurrency
+sweeps, raw results, setup, limitations and verified resume bullets.
 
 See [docs/systems-audit.md](docs/systems-audit.md) for the architecture audit,
 WAL crash-recovery fixes, authenticated concurrency sweeps, two-minute soak,

@@ -1,5 +1,9 @@
 # Backend and recovery audit — October 3, 2026
 
+**Follow-up:** [Durable order-path optimization](performance-optimization.md)
+records the later measured performance improvements. The tables below preserve
+the earlier audit results.
+
 This is an undergraduate exchange systems project. The improvements emphasize
 observable correctness and honest measurement; they do not establish production
 readiness or real-world capacity.
