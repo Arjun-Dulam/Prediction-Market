@@ -1,0 +1,73 @@
+$ git rev-parse HEAD
+90221a6329cb4e19abcca70b3da57e5d019e8b65
+
+$ sw_vers
+ProductName:		macOS
+ProductVersion:		27.0.1
+BuildVersion:		26A434
+
+$ sysctl hw.model hw.memsize hw.ncpu
+hw.model: Mac15,12
+hw.memsize: 25769803776
+hw.ncpu: 8
+
+$ docker info --format Docker {{.ServerVersion}}; architecture {{.Architecture}}; CPUs {{.NCPU}}; memory {{.MemTotal}} bytes
+Docker 29.8.1; architecture aarch64; CPUs 8; memory 8319770624 bytes
+
+$ docker image inspect pme-audit-api:timed-baseline pme-audit-api:sql-only pme-audit-api:latest pme-audit-engine:latest postgres:17-alpine redis:7-alpine --format {{.RepoTags}} {{.Id}}
+[pme-audit-api:timed-baseline] sha256:058f0b848bd4f605f29af73f00f713a3493bef2fa0b741945f3037639e834879
+[pme-audit-api:sql-only] sha256:59abb914b2e02d2da6848b2d3c6f88bf591aa2490b37da1ef1798cfe0ea5e71c
+[pme-audit-api:latest] sha256:41fa72a4cc7c3c439c2c2b5399f52ca525af8a4776558a7d0176005dcec53600
+[pme-audit-engine:latest] sha256:10212f09579d9a10a3efd80e27ad43c7a68b8f33d86c919c2ab603f4e351ee18
+[postgres:17-alpine] sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+[redis:7-alpine] sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+
+$ docker exec pme-audit-psql_bp-1 psql -U exchange -d exchange -c SHOW fsync; SHOW synchronous_commit; SHOW full_page_writes;
+ fsync 
+-------
+ on
+(1 row)
+
+ synchronous_commit 
+--------------------
+ on
+(1 row)
+
+ full_page_writes 
+------------------
+ on
+(1 row)
+
+
+$ go version
+go version go1.27.1 darwin/arm64
+/private/tmp/pme-final-api: go1.26.8
+	path	go-backend/cmd/api
+	mod	go-backend	(devel)	
+	dep	github.com/cespare/xxhash/v2	v2.3.0	h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
+	dep	github.com/go-chi/chi/v5	v5.2.5	h1:Eg4myHZBjyvJmAFjFvWgrqDTXFyOzjj7YIm3L3mu6Ug=
+	dep	github.com/go-chi/cors	v1.2.2	h1:Jmey33TE+b+rB7fT8MUy1u0I4L+NARQlK6LhzKPSyQE=
+	dep	github.com/google/uuid	v1.6.0	h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
+	dep	github.com/gorilla/websocket	v1.5.3	h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=
+	dep	github.com/jackc/pgpassfile	v1.0.0	h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM=
+	dep	github.com/jackc/pgservicefile	v0.0.0-20240606120523-5a60cdf6a761	h1:iCEnooe7UlwOQYpKFhBabPMi4aNAfoODPEFNiAnClxo=
+	dep	github.com/jackc/pgx/v5	v5.9.1	h1:uwrxJXBnx76nyISkhr33kQLlUqjv7et7b9FjCen/tdc=
+	dep	github.com/jackc/puddle/v2	v2.2.2	h1:PR8nw+E/1w0GLuRFSmiioY6UooMp6KJv0/61nB7icHo=
+	dep	github.com/joho/godotenv	v1.5.1	h1:7eLL/+HRGLY0ldzfGMeQkb7vMd0as4CfYvUVzLqw0N0=
+	dep	github.com/redis/go-redis/v9	v9.22.0	h1:laDvpYXTJtZLloinw1fA5Kqd6HAEH2XKxOkG/PDq2F0=
+	dep	go.uber.org/atomic	v1.11.0	h1:ZvwS0R+56ePWxUNi+Atn9dWONBPp/AUETXlHW0DxSjE=
+	dep	golang.org/x/crypto	v0.48.0	h1:/VRzVqiRSggnhY7gNRxPauEQ5Drw9haKdM0jqfcCFts=
+	dep	golang.org/x/net	v0.49.0	h1:eeHFmOGUTtaaPSGNmjBKpbng9MulQsJURQUAfUwY++o=
+	dep	golang.org/x/sync	v0.20.0	h1:e0PTpb7pjO8GAtTs2dQ6jYa5BWYlMuX047Dco/pItO4=
+	dep	golang.org/x/sys	v0.41.0	h1:Ivj+2Cp/ylzLiEU89QhWblYnOE9zerudt9Ftecq2C6k=
+	dep	golang.org/x/text	v0.35.0	h1:JOVx6vVDFokkpaq1AEptVzLTpDe9KGpj5tR4/X+ybL8=
+	dep	google.golang.org/genproto/googleapis/rpc	v0.0.0-20260209200024-4cfbd4190f57	h1:mWPCjDEyshlQYzBpMNHaEof6UX1PmHcaUODUywQ0uac=
+	dep	google.golang.org/grpc	v1.79.1	h1:zGhSi45ODB9/p3VAawt9a+O/MULLl9dpizzNNpq7flY=
+	dep	google.golang.org/protobuf	v1.36.11	h1:fV6ZwhNocDyBLK0dj+fg8ektcVegBBuEolpbTQyBNVE=
+	build	-buildmode=exe
+	build	-compiler=gc
+	build	-trimpath=true
+	build	CGO_ENABLED=0
+	build	GOARCH=arm64
+	build	GOOS=linux
+	build	GOARM64=v8.0
