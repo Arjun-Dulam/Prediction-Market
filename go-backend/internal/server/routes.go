@@ -182,9 +182,6 @@ func (s *Server) durableOrderHandler(w http.ResponseWriter, r *http.Request) {
 	if s.metrics != nil {
 		s.metrics.OrderAccepted()
 	}
-	if market, ok := s.trading.Market(req.MarketID); ok {
-		s.refreshQuote(ctx, req.MarketID, market.Symbol)
-	}
 	s.hub.Publish(ws.Message{Channel: "market:" + req.MarketID, Type: "order", Data: map[string]string{"order_id": req.ID}})
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -303,27 +300,26 @@ func (s *Server) cancelOrderHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) refreshQuote(ctx context.Context, marketID, symbol string) {
+// The trading worker publishes once per affected market/group after committing.
+// Out-of-order publishers are rejected atomically by Redis. WebSocket clients
+// also compare sequence numbers because concurrent sends can still interleave.
+func (s *Server) publishQuotes(quotes []trading.MarketQuote) {
 	start := time.Now()
 	if s.metrics != nil {
 		defer func() { s.metrics.Observe(trading.StageQuote, time.Since(start)) }()
 	}
-	if s.engine == nil {
-		return
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	for _, q := range quotes {
+		quote := cache.Quote{Bid: q.Bid, Ask: q.Ask, Sequence: q.Sequence, UpdatedAt: time.Now().UTC()}
+		if s.quotes != nil {
+			accepted, err := s.quotes.SetVersioned(ctx, q.Symbol, quote)
+			if err != nil || !accepted {
+				continue
+			}
+		}
+		s.hub.Publish(ws.Message{Channel: "market:" + q.MarketID, Type: "quote", Data: quote})
 	}
-	bid, err := s.engine.BestBid(ctx, symbol)
-	if err != nil {
-		return
-	}
-	ask, err := s.engine.BestAsk(ctx, symbol)
-	if err != nil {
-		return
-	}
-	quote := cache.Quote{Bid: bid, Ask: ask}
-	if s.quotes != nil {
-		_ = s.quotes.Set(ctx, symbol, quote)
-	}
-	s.hub.Publish(ws.Message{Channel: "market:" + marketID, Type: "quote", Data: quote})
 }
 func (s *Server) resolveMarketHandler(w http.ResponseWriter, r *http.Request) {
 	if s.trading == nil {

@@ -34,6 +34,9 @@ type metricSample struct {
 	Metrics string  `json:"metrics"`
 }
 type result struct {
+	MarketCount           int            `json:"market_count"`
+	AccountScope          string         `json:"account_scope"`
+	Markets               []string       `json:"market_ids"`
 	Market                string         `json:"market_id"`
 	UserIDs               []string       `json:"user_ids"`
 	MetricsSamples        []metricSample `json:"metrics_samples,omitempty"`
@@ -86,16 +89,18 @@ func main() {
 	duration := flag.Duration("duration", 0, "submit for this duration, then drain outstanding requests")
 	label := flag.String("label", "local", "baseline or improved build label")
 	environment := flag.String("environment", "unspecified", "hardware, Docker resources, server configuration")
+	markets := flag.Int("markets", 1, "number of independent books; each paired YES/NO order uses one book")
+	accountScope := flag.String("accounts", "shared", "shared or independent account pair per market")
 	flag.Parse()
 	counts, err := parseLevels(*levels, *concurrency)
-	if err != nil || *orders < 2 || *orders%2 != 0 || *repeats < 1 || *duration < 0 {
+	if err != nil || *orders < 2 || *orders%2 != 0 || *repeats < 1 || *duration < 0 || *markets < 1 || (*accountScope != "shared" && *accountScope != "independent") {
 		fmt.Fprintln(os.Stderr, "require even orders >= 2, positive clients/repeats, nonnegative duration:", err)
 		os.Exit(2)
 	}
 	failed := false
 	for repeat := 1; repeat <= *repeats; repeat++ {
 		for _, count := range counts {
-			r, err := run(strings.TrimRight(*base, "/"), *orders, count, *duration)
+			r, err := runMarkets(strings.TrimRight(*base, "/"), *orders, count, *duration, *markets, *accountScope)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "setup:", err)
 				os.Exit(1)
@@ -164,13 +169,21 @@ func request(client *http.Client, method, url, token string, payload any, want i
 	return nil
 }
 func run(base string, orders, concurrency int, duration time.Duration) (result, error) {
-	r := result{Concurrency: concurrency, TargetDurationSeconds: duration.Seconds(), Statuses: map[string]int{}}
+	return runMarkets(base, orders, concurrency, duration, 1, "shared")
+}
+func runMarkets(base string, orders, concurrency int, duration time.Duration, marketCount int, scope string) (result, error) {
+	r := result{Concurrency: concurrency, TargetDurationSeconds: duration.Seconds(), Statuses: map[string]int{}, MarketCount: marketCount, AccountScope: scope}
 	transport := &http.Transport{MaxIdleConns: concurrency * 2, MaxIdleConnsPerHost: concurrency * 2}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Timeout: 15 * time.Second, Transport: transport}
 	stamp := strconv.FormatInt(time.Now().UnixNano(), 10)
 	market := "load-" + stamp
-	users := make([]identity, 2)
+	markets := make([]string, marketCount)
+	usersCount := 2
+	if scope == "independent" {
+		usersCount = 2 * marketCount
+	}
+	users := make([]identity, usersCount)
 	for i := range users {
 		name := fmt.Sprintf("load-%s-%d", stamp, i)
 		if err := request(client, "POST", base+"/api/v1/users/register", "", map[string]string{"email": name + "@example.com", "username": name, "password": "benchmark-password"}, 201, &users[i]); err != nil {
@@ -180,8 +193,11 @@ func run(base string, orders, concurrency int, duration time.Duration) (result, 
 			return r, fmt.Errorf("invalid registration response")
 		}
 	}
-	if err := request(client, "POST", base+"/api/v1/markets", users[0].Token, map[string]string{"id": market, "symbol": "LOAD_" + stamp}, 201, nil); err != nil {
-		return r, err
+	for i := range markets {
+		markets[i] = fmt.Sprintf("%s-%d", market, i)
+		if err := request(client, "POST", base+"/api/v1/markets", users[0].Token, map[string]string{"id": markets[i], "symbol": fmt.Sprintf("LOAD_%s_%d", stamp, i)}, 201, nil); err != nil {
+			return r, err
+		}
 	}
 	funding := int64(orders) * 100
 	if duration > 0 {
@@ -205,7 +221,8 @@ func run(base string, orders, concurrency int, duration time.Duration) (result, 
 		_, _ = io.Copy(&b, io.LimitReader(resp.Body, 65536))
 		return b.String()
 	}
-	r.Market = market
+	r.Market = markets[0]
+	r.Markets = markets
 	for _, u := range users {
 		r.UserIDs = append(r.UserIDs, u.ID)
 	}
@@ -242,11 +259,16 @@ func run(base string, orders, concurrency int, duration time.Duration) (result, 
 				if i%2 == 1 {
 					side = "buy_no"
 				}
-				o := order{ID: fmt.Sprintf("load-order-%s-%d", stamp, i), Market: market, Side: side, Price: 50, Quantity: 1}
+				marketIndex := (i / 2) % marketCount
+				userIndex := i % 2
+				if scope == "independent" {
+					userIndex += marketIndex * 2
+				}
+				o := order{ID: fmt.Sprintf("load-order-%s-%d", stamp, i), Market: markets[marketIndex], Side: side, Price: 50, Quantity: 1}
 				b, _ := json.Marshal(o)
 				req, _ := http.NewRequest("POST", base+"/api/v1/trading/orders", bytes.NewReader(b))
 				req.Header.Set("Content-Type", "application/json")
-				req.Header.Set("Authorization", "Bearer "+users[i%2].Token)
+				req.Header.Set("Authorization", "Bearer "+users[userIndex].Token)
 				t0 := time.Now()
 				resp, err := client.Do(req)
 				status := "transport_error"
@@ -315,7 +337,7 @@ func run(base string, orders, concurrency int, duration time.Duration) (result, 
 	r.Windows = windows(all, elapsed, 10*time.Second)
 	r.MetricsAfter = metrics()
 	if r.Failures == 0 {
-		if err := verify(client, base, market, users, funding, count); err != nil {
+		if err := verifyMarkets(client, base, markets, users, funding, count, scope); err != nil {
 			r.VerificationError = err.Error()
 		} else {
 			r.Verified = true
@@ -323,30 +345,51 @@ func run(base string, orders, concurrency int, duration time.Duration) (result, 
 	}
 	return r, nil
 }
-func verify(client *http.Client, base, market string, users []identity, funding int64, count int) error {
+func verifyMarkets(client *http.Client, base string, markets []string, users []identity, funding int64, count int, scope string) error {
+	pairs := count / 2
 	for i, u := range users {
+		expectedPairs := pairs
+		marketIndices := make([]int, 0, len(markets))
+		if scope == "independent" {
+			m := i / 2
+			expectedPairs = pairs / len(markets)
+			if m < pairs%len(markets) {
+				expectedPairs++
+			}
+			marketIndices = append(marketIndices, m)
+		} else {
+			for m := range markets {
+				marketIndices = append(marketIndices, m)
+			}
+		}
 		var balance struct {
 			Cents int64 `json:"cents"`
 		}
 		if err := request(client, "GET", base+"/api/v1/balances/"+u.ID, u.Token, nil, 200, &balance); err != nil {
 			return err
 		}
-		if balance.Cents != funding-int64(count/2)*50 {
-			return fmt.Errorf("account %d balance=%d, want %d", i, balance.Cents, funding-int64(count/2)*50)
+		if want := funding - int64(expectedPairs)*50; balance.Cents != want {
+			return fmt.Errorf("account %d balance=%d, want %d", i, balance.Cents, want)
 		}
-		var p struct {
-			Yes int `json:"yes"`
-			No  int `json:"no"`
-		}
-		if err := request(client, "GET", base+"/api/v1/positions/"+u.ID+"/"+market, u.Token, nil, 200, &p); err != nil {
-			return err
-		}
-		wantYes, wantNo := count/2, 0
-		if i == 1 {
-			wantYes, wantNo = 0, count/2
-		}
-		if p.Yes != wantYes || p.No != wantNo {
-			return fmt.Errorf("account %d position=%+v, want yes=%d no=%d", i, p, wantYes, wantNo)
+		for _, m := range marketIndices {
+			n := pairs / len(markets)
+			if m < pairs%len(markets) {
+				n++
+			}
+			var p struct {
+				Yes int `json:"yes"`
+				No  int `json:"no"`
+			}
+			if err := request(client, "GET", base+"/api/v1/positions/"+u.ID+"/"+markets[m], u.Token, nil, 200, &p); err != nil {
+				return err
+			}
+			yes, no := n, 0
+			if i%2 == 1 {
+				yes, no = 0, n
+			}
+			if p.Yes != yes || p.No != no {
+				return fmt.Errorf("account %d market %d position=%+v, want %d/%d", i, m, p, yes, no)
+			}
 		}
 	}
 	return nil

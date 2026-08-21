@@ -267,7 +267,7 @@ func TestSnapshotAndWALReplayPreserveAdmissionOrder(t *testing.T) {
 		t.Fatal("replay changed account state")
 	}
 	for _, o := range s.orders {
-		if s.engineOrders[o.EngineID] != o.ID {
+		if s.engineOrders[engineOrderKey{o.MarketID, o.EngineID}] != o.ID {
 			t.Fatalf("stale engine ID collision: %+v", s.engineOrders)
 		}
 	}
