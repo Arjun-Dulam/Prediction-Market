@@ -65,7 +65,8 @@ func (s *Service) drainOrders() {
 		clear(s.pending[len(s.pending)-n:])
 		s.pending = s.pending[:len(s.pending)-n]
 		s.pendingMu.Unlock()
-		outcomes := s.placeBatch(requests)
+		outcomes, quotes := s.placeBatchWithQuotes(requests)
+		s.publishQuotes(quotes)
 		for i, request := range requests {
 			request.done <- outcomes[i]
 		}
@@ -77,9 +78,14 @@ func (s *Service) drainOrders() {
 // All engine calls and staging occur under the existing state lock. The staged
 // completion map is private, so readers and snapshots never see uncommitted fills.
 func (s *Service) placeBatch(requests []*placement) []error {
+	outcomes, _ := s.placeBatchWithQuotes(requests)
+	return outcomes
+}
+func (s *Service) placeBatchWithQuotes(requests []*placement) ([]error, []MarketQuote) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	outcomes := make([]error, len(requests))
+	var quotes []MarketQuote
 	for _, request := range requests {
 		s.observe(StageLockWait, request.queued)
 	}
@@ -87,7 +93,7 @@ func (s *Service) placeBatch(requests []*placement) []error {
 		for i := range outcomes {
 			outcomes[i] = s.failure
 		}
-		return outcomes
+		return outcomes, nil
 	}
 	var initial []Event
 	var admitted []int
@@ -140,7 +146,7 @@ func (s *Service) placeBatch(requests []*placement) []error {
 		byID[o.ID] = i
 	}
 	if len(admitted) == 0 {
-		return outcomes
+		return outcomes, nil
 	}
 	// Cancellation after admission cannot abort other clients' durability. Each
 	// batch has its own finite deadline; an uncertain engine/persistence result
@@ -150,22 +156,48 @@ func (s *Service) placeBatch(requests []*placement) []error {
 	err := s.commitMany(ctx, initial)
 	if err == nil {
 		staged := make(map[string]Order)
-		engineIDs := make(map[uint32]string)
+		engineIDs := make(map[engineOrderKey]string)
 		var completed []Event
+		commands := make([]EngineOrder, 0, len(admitted))
+		markets := make([]string, 0, len(admitted))
 		for _, i := range admitted {
+			o := s.orders[requests[i].order.ID]
+			commands = append(commands, EngineOrder{s.markets[o.MarketID].Symbol, int32(o.EnginePrice), uint32(o.Quantity), o.EngineSide})
+			markets = append(markets, o.MarketID)
+		}
+		batch := EngineBatch{}
+		if engine, ok := s.cfg.Engine.(BatchEngine); ok && !s.cfg.DisableEngineBatch {
+			start := time.Now()
+			batch, err = engine.AddOrders(ctx, commands)
+			s.observe(StageEngine, start)
+			if err == nil && len(batch.Results) != len(admitted) {
+				err = errors.New("invalid engine batch result count")
+			}
+			if err != nil {
+				err = s.fail(fmt.Errorf("matching engine batch: %w", err))
+			}
+		}
+		for j, i := range admitted {
+			if err != nil {
+				break
+			}
 			o := s.orders[requests[i].order.ID]
 			o.Status = Open
 			if s.cfg.Engine != nil {
-				start := time.Now()
 				var result EngineResult
-				result, err = s.cfg.Engine.AddOrder(ctx, s.markets[o.MarketID].Symbol, int32(o.EnginePrice), uint32(o.Quantity), o.EngineSide)
-				s.observe(StageEngine, start)
+				if len(batch.Results) > 0 {
+					result = batch.Results[j]
+				} else {
+					start := time.Now()
+					result, err = s.cfg.Engine.AddOrder(ctx, commands[j].Symbol, commands[j].Price, commands[j].Quantity, commands[j].Side)
+					s.observe(StageEngine, start)
+				}
 				if err != nil {
 					err = s.fail(fmt.Errorf("matching engine batch: %w", err))
 					break
 				}
 				o.EngineID = result.OrderID
-				engineIDs[o.EngineID] = o.ID
+				engineIDs[engineOrderKey{o.MarketID, o.EngineID}] = o.ID
 				staged[o.ID] = o
 				completed = append(completed, Event{Type: EventOrder, Order: o})
 				completed = append(completed, s.buildTradeEvents(o.MarketID, result.Trades, engineIDs, staged)...)
@@ -175,6 +207,9 @@ func (s *Service) placeBatch(requests []*placement) []error {
 		}
 		if err == nil {
 			err = s.commitMany(ctx, completed)
+			if err == nil {
+				quotes = s.readQuotes(ctx, markets, batch.Quotes)
+			}
 		}
 	}
 	for _, i := range admitted {
@@ -183,5 +218,5 @@ func (s *Service) placeBatch(requests []*placement) []error {
 	for alias, original := range aliases {
 		outcomes[alias] = outcomes[original]
 	}
-	return outcomes
+	return outcomes, quotes
 }

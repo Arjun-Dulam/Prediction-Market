@@ -16,8 +16,12 @@ import uuid
 parser = argparse.ArgumentParser()
 parser.add_argument('--base', default='http://localhost:8080')
 parser.add_argument('--project', required=True, help='disposable Compose project to SIGKILL')
+parser.add_argument('--partitioned', action='store_true', help='include both engine owners and their Compose override')
 args = parser.parse_args()
 compose = ['docker', 'compose', '-p', args.project]
+if args.partitioned:
+    compose += ['-f', 'docker-compose.yml', '-f', 'docker-compose.partitioned.yml']
+engines = ['engine', 'engine_b'] if args.partitioned else ['engine']
 root = pathlib.Path(__file__).resolve().parents[1] / 'go-backend'
 
 def command(*parts):
@@ -67,8 +71,8 @@ def state():
 before = state()
 assert before['balances'] == [{'cents': 9198}, {'cents': 9600}], before
 assert before['positions'] == [{'yes': 10, 'no': 0}, {'yes': 0, 'no': 10}], before
-command('kill', '-s', 'SIGKILL', 'api', 'engine')
-command('up', '-d', '--wait', 'engine', 'api')
+command('kill', '-s', 'SIGKILL', 'api', *engines)
+command('up', '-d', '--wait', *engines, 'api')
 after = state()
 assert before == after, (before, after)
 # Crossing order consumes the better price, then the earliest same-price order.
@@ -86,5 +90,5 @@ for i, user in enumerate(users):
     sql = "SELECT json_build_object('cents',b.cents,'yes',p.yes_shares,'no',p.no_shares) FROM balances b JOIN positions p ON p.user_id=b.user_id WHERE b.user_id='" + uid + "' AND p.market_id='" + market + "'"
     projected = json.loads(command('exec', '-T', 'psql_bp', 'psql', '-U', 'exchange', '-d', 'exchange', '-Atc', sql))
     assert projected == [{'cents': 9298, 'yes': 15, 'no': 0}, {'cents': 9202, 'yes': 0, 'no': 15}][i], projected
-print(json.dumps({'parallel_retries': 32, 'crash': 'SIGKILL API and C++ engine',
+print(json.dumps({'engine_instances': len(engines), 'parallel_retries': 32, 'crash': 'SIGKILL API and C++ engine',
     'account_state_equal': before == after, 'post_recovery_price_time_priority': True, 'post_recovery_cancel': True, 'postgres_matches_api': True}))

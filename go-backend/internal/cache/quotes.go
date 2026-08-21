@@ -8,6 +8,7 @@ import (
 )
 
 type Quote struct {
+	Sequence  uint64    `json:"sequence,string"`
 	Bid       int32     `json:"bid"`
 	Ask       int32     `json:"ask"`
 	Last      int32     `json:"last"`

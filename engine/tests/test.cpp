@@ -673,3 +673,43 @@ int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
+
+TEST(ExchangeBatchTest, OrderedFillsAndFinalQuotesMatchSequentialExecution) {
+  Exchange batched, sequential;
+  for (const auto& symbol : {"A", "B"}) { batched.add_book(symbol); sequential.add_book(symbol); }
+  std::vector<Exchange::Submission> orders{
+    {"A", 40, 2, Side::Buy}, {"B", 30, 1, Side::Buy},
+    {"A", 40, 3, Side::Buy}, {"A", 35, 4, Side::Sell}};
+  auto batch = batched.add_orders(orders);
+  ASSERT_EQ(batch.results.size(), orders.size());
+  for (size_t i=0;i<orders.size();++i) {
+    auto input=orders[i]; Order order(input.price,input.quantity,input.side);
+    std::vector<Trade> fills; sequential.add_order(input.symbol,order,&fills);
+    ASSERT_EQ(batch.results[i].order_id,order.get_order_id());
+    ASSERT_EQ(batch.results[i].trades.size(),fills.size());
+    for (size_t j=0;j<fills.size();++j) {
+      EXPECT_EQ(batch.results[i].trades[j].buy_order_id,fills[j].buy_order_id);
+      EXPECT_EQ(batch.results[i].trades[j].sell_order_id,fills[j].sell_order_id);
+      EXPECT_EQ(batch.results[i].trades[j].quantity,fills[j].quantity);
+      EXPECT_EQ(batch.results[i].trades[j].price,fills[j].price);
+    }
+  }
+  ASSERT_EQ(batch.results[3].trades.size(),2);
+  EXPECT_EQ(batch.results[3].trades[0].buy_order_id,batch.results[0].order_id);
+  EXPECT_EQ(batch.results[3].trades[1].buy_order_id,batch.results[2].order_id);
+  ASSERT_EQ(batch.quotes.size(),2);
+  for (const auto& q : batch.quotes) {
+    auto expected=sequential.get_quote(q.symbol);
+    EXPECT_EQ(q.bid,expected.bid); EXPECT_EQ(q.ask,expected.ask);
+  }
+}
+TEST(ExchangeBatchTest, InvalidGroupDoesNotPartiallyExecuteOrAllocateIds) {
+  Exchange exchange; exchange.add_book("A");
+  EXPECT_THROW(exchange.add_orders({{"A",40,1,Side::Buy},{"missing",40,1,Side::Buy}}),Exchange::SYMBOL_NOT_FOUND);
+  EXPECT_EQ(exchange.get_quote("A").bid,-1);
+  EXPECT_THROW(exchange.add_orders({{"A",40,1,Side::Buy},{"A",40,0,Side::Buy}}),std::invalid_argument);
+  EXPECT_THROW(exchange.add_orders({}),std::invalid_argument);
+  EXPECT_THROW(exchange.add_orders(std::vector<Exchange::Submission>(33,{"A",40,1,Side::Buy})),std::invalid_argument);
+  auto batch=exchange.add_orders({{"A",40,1,Side::Buy}});
+  ASSERT_EQ(batch.results.size(),1); EXPECT_EQ(batch.results[0].order_id,1);
+}

@@ -72,6 +72,58 @@ class MatchingEngineServiceImpl final
     return Status::OK;
   }
 
+  Status AddOrders(ServerContext*, const exchange_comms::OrderBatch* request,
+                   exchange_comms::AddOrdersResponse* reply) override {
+    std::vector<Exchange::Submission> orders;
+    if (request->orders_size() < 1 || request->orders_size() > 32)
+      return Status(grpc::StatusCode::INVALID_ARGUMENT, "batch size must be 1-32");
+    for (const auto& input : request->orders()) {
+      if (!input.has_order() || (input.order().side() != exchange_comms::SIDE_BUY &&
+                                input.order().side() != exchange_comms::SIDE_SELL))
+        return Status(grpc::StatusCode::INVALID_ARGUMENT, "invalid side/order");
+      orders.push_back({input.symbol(), input.order().price(), input.order().quantity(),
+                       input.order().side() == exchange_comms::SIDE_BUY ? Side::Buy : Side::Sell});
+    }
+    try {
+      auto batch = exchange_.add_orders(orders);
+      for (const auto& result : batch.results) {
+        auto* output = reply->add_results();
+        output->set_order_id(result.order_id);
+        for (const auto& trade : result.trades) {
+          auto* fill = output->add_trades();
+          fill->set_buy_order_id(trade.buy_order_id);
+          fill->set_sell_order_id(trade.sell_order_id);
+          fill->set_price(trade.price);
+          fill->set_quantity(trade.quantity);
+        }
+      }
+      for (const auto& quote : batch.quotes) {
+        auto* output = reply->add_quotes();
+        output->set_symbol(quote.symbol);
+        output->set_bid(quote.bid);
+        output->set_ask(quote.ask);
+      }
+    } catch (const SYMBOL_NOT_FOUND&) {
+      return Status(grpc::StatusCode::NOT_FOUND, "symbol not found");
+    } catch (const std::invalid_argument& error) {
+      return Status(grpc::StatusCode::INVALID_ARGUMENT, error.what());
+    }
+    return Status::OK;
+  }
+
+  Status GetQuote(ServerContext*, const Symbol* symbol,
+                  exchange_comms::BookQuote* reply) override {
+    try {
+      auto quote = exchange_.get_quote(symbol->symbol());
+      reply->set_symbol(quote.symbol);
+      reply->set_bid(quote.bid);
+      reply->set_ask(quote.ask);
+    } catch (const SYMBOL_NOT_FOUND&) {
+      return Status(grpc::StatusCode::NOT_FOUND, "symbol not found");
+    }
+    return Status::OK;
+  }
+
   Status RemoveOrder(ServerContext* context,
                      const OrderDeletion* order_deletion,
                      Boolean* reply) override {

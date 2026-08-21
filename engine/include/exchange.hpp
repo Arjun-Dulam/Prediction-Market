@@ -18,6 +18,14 @@ class Exchange {
 
  public:
   Exchange();
+  struct Submission { std::string symbol; int32_t price; uint32_t quantity; Side side; };
+  struct Result { uint32_t order_id; std::vector<Trade> trades; };
+  struct Quote { std::string symbol; int32_t bid; int32_t ask; };
+  struct Batch { std::vector<Result> results; std::vector<Quote> quotes; };
+  // Validate every command before mutation, then process in request order.
+  // The exchange lock prevents other public operations interleaving the group.
+  Batch add_orders(const std::vector<Submission>& orders);
+  Quote get_quote(const std::string& symbol) const;
 
   /**
    * @brief If symbol doesn't already exist, method creates new orderbook and

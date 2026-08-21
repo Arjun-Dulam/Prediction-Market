@@ -53,12 +53,24 @@ message AddOrderResponse {
   repeated TradeResult trades = 2;
 }
 
+message OrderBatch { repeated OrderSubmission orders = 1; }
+message BookQuote {
+  string symbol = 1;
+  int32 bid = 2;
+  int32 ask = 3;
+}
+message AddOrdersResponse {
+  repeated AddOrderResponse results = 1;
+  repeated BookQuote quotes = 2;
+}
 message BookVoid {}
 
 service MatchingEngine {
   rpc AddBook(Symbol) returns (BookVoid); 
   rpc RemoveBook(Symbol) returns (BookVoid); 
   rpc AddOrder(OrderSubmission) returns (AddOrderResponse);
+  rpc AddOrders(OrderBatch) returns (AddOrdersResponse);
+  rpc GetQuote(Symbol) returns (BookQuote);
   rpc RemoveOrder(OrderDeletion) returns (Boolean);
   rpc GetBestBid(Symbol) returns (Price); 
   rpc GetBestAsk(Symbol) returns (Price); 

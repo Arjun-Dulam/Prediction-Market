@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -85,5 +87,75 @@ func TestWindows(t *testing.T) {
 	got := windows([]sample{{end: time.Second, latency: time.Millisecond}, {end: 11 * time.Second, latency: 2 * time.Millisecond, err: "failed"}}, 12*time.Second, 10*time.Second)
 	if len(got) != 2 || got[0].Throughput != 0.1 || got[1].Duration != 2 || got[1].Failures != 1 || got[1].P99 != 2 {
 		t.Fatalf("%+v", got)
+	}
+}
+
+func TestMultiMarketGeneratorVerifiesUnevenCountsAndBothWalletLayouts(t *testing.T) {
+	for _, scope := range []string{"shared", "independent"} {
+		t.Run(scope, func(t *testing.T) {
+			var mu sync.Mutex
+			tokens := map[string]string{}
+			balances := map[string]int64{}
+			positions := map[string]map[string]int{}
+			next := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				defer mu.Unlock()
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/register"):
+					next++
+					id := strconv.Itoa(next)
+					tokens["Bearer token-"+id] = id
+					w.WriteHeader(201)
+					json.NewEncoder(w).Encode(identity{ID: id, Token: "token-" + id})
+				case strings.HasSuffix(r.URL.Path, "/markets"):
+					w.WriteHeader(201)
+				case strings.HasSuffix(r.URL.Path, "/deposit"):
+					var d struct {
+						Cents int64 `json:"cents"`
+					}
+					json.NewDecoder(r.Body).Decode(&d)
+					balances[tokens[r.Header.Get("Authorization")]] += d.Cents
+					w.WriteHeader(204)
+				case strings.HasSuffix(r.URL.Path, "/orders"):
+					var o order
+					json.NewDecoder(r.Body).Decode(&o)
+					id := tokens[r.Header.Get("Authorization")]
+					balances[id] -= 50
+					key := id + "/" + o.Market
+					if positions[key] == nil {
+						positions[key] = map[string]int{"yes": 0, "no": 0}
+					}
+					if o.Side == "buy_yes" {
+						positions[key]["yes"]++
+					} else {
+						positions[key]["no"]++
+					}
+					w.WriteHeader(201)
+					json.NewEncoder(w).Encode(map[string]string{"order_id": o.ID})
+				case strings.Contains(r.URL.Path, "/balances/"):
+					id := strings.TrimPrefix(r.URL.Path, "/api/v1/balances/")
+					json.NewEncoder(w).Encode(map[string]int64{"cents": balances[id]})
+				case strings.Contains(r.URL.Path, "/positions/"):
+					key := strings.TrimPrefix(r.URL.Path, "/api/v1/positions/")
+					json.NewEncoder(w).Encode(positions[key])
+				default:
+					w.Write([]byte("metrics"))
+				}
+			}))
+			defer srv.Close()
+			r, err := runMarkets(srv.URL, 14, 4, 0, 3, scope)
+			if err != nil || !r.Verified || r.Failures != 0 || len(r.Markets) != 3 {
+				t.Fatalf("%+v %v", r, err)
+			}
+			wantUsers := 2
+			if scope == "independent" {
+				wantUsers = 6
+			}
+			if len(r.UserIDs) != wantUsers {
+				t.Fatal("wrong wallet layout")
+			}
+		})
 	}
 }

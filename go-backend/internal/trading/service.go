@@ -108,6 +108,39 @@ type EngineResult struct {
 	OrderID uint32
 	Trades  []EngineTrade
 }
+
+// Engine order IDs are local to a market owner; different engine instances may
+// legitimately allocate the same numeric ID.
+type engineOrderKey struct {
+	market string
+	id     uint32
+}
+type EngineOrder struct {
+	Symbol   string
+	Price    int32
+	Quantity uint32
+	Side     string
+}
+type EngineQuote struct {
+	Symbol   string
+	Bid, Ask int32
+}
+type EngineBatch struct {
+	Results []EngineResult
+	Quotes  []EngineQuote
+}
+type BatchEngine interface {
+	AddOrders(context.Context, []EngineOrder) (EngineBatch, error)
+}
+type QuoteEngine interface {
+	Quote(context.Context, string) (EngineQuote, error)
+}
+type MarketQuote struct {
+	MarketID, Symbol string
+	Bid, Ask         int32
+	Sequence         uint64
+}
+
 type Engine interface {
 	AddBook(context.Context, string) error
 	AddOrder(context.Context, string, int32, uint32, string) (EngineResult, error)
@@ -145,7 +178,10 @@ type Config struct {
 	Observe               func(Stage, time.Duration)
 	// OrderBatchSize coalesces already queued orders, without a batching timer.
 	// Values <=1 retain the single-order path. Maximum supported size is 32.
-	OrderBatchSize int
+	OrderBatchSize     int
+	DisableEngineBatch bool
+	// Derived quote publication runs after the durable commit, outside mu.
+	PublishQuotes func([]MarketQuote)
 }
 type Position struct {
 	Yes int `json:"yes"`
@@ -166,7 +202,7 @@ type Service struct {
 	walFile      *os.File
 	markets      map[string]Market
 	orders       map[string]Order
-	engineOrders map[uint32]string
+	engineOrders map[engineOrderKey]string
 	balances     map[string]int64
 	positions    map[string]map[string]Position
 	sequence     uint64
@@ -188,7 +224,7 @@ func NewWithConfig(cfg Config) (*Service, error) {
 	if cfg.WALPath == "" {
 		return nil, errors.New("WAL path is required")
 	}
-	s := &Service{cfg: cfg, markets: map[string]Market{}, orders: map[string]Order{}, engineOrders: map[uint32]string{}, balances: map[string]int64{}, positions: map[string]map[string]Position{}}
+	s := &Service{cfg: cfg, markets: map[string]Market{}, orders: map[string]Order{}, engineOrders: map[engineOrderKey]string{}, balances: map[string]int64{}, positions: map[string]map[string]Position{}}
 	if cfg.SnapshotPath != "" {
 		if err := s.loadSnapshot(); err != nil {
 			return nil, err
@@ -310,11 +346,11 @@ func (s *Service) apply(e Event) {
 		s.balances[e.UserID] += e.Amount
 	case EventOrder:
 		if old, ok := s.orders[e.Order.ID]; ok && old.EngineID != 0 {
-			delete(s.engineOrders, old.EngineID)
+			delete(s.engineOrders, engineOrderKey{old.MarketID, old.EngineID})
 		}
 		s.orders[e.Order.ID] = e.Order
 		if e.Order.EngineID != 0 && (e.Order.Status == Pending || e.Order.Status == Open || e.Order.Status == Partial) {
-			s.engineOrders[e.Order.EngineID] = e.Order.ID
+			s.engineOrders[engineOrderKey{e.Order.MarketID, e.Order.EngineID}] = e.Order.ID
 		}
 		s.balances[e.UserID] += e.Amount
 	case EventPosition:
@@ -447,6 +483,11 @@ func (s *Service) CreateMarketFor(id, symbol, ownerID string) error {
 		}
 		return errors.New("market id already exists with different parameters")
 	}
+	for _, existing := range s.markets {
+		if existing.Symbol == symbol {
+			return errors.New("symbol already belongs to another market")
+		}
+	}
 	if s.cfg.Engine != nil {
 		if err := s.cfg.Engine.AddBook(context.Background(), symbol); err != nil {
 			return err
@@ -492,7 +533,8 @@ func (s *Service) placeSingle(ctx context.Context, o Order) error {
 	start := time.Now()
 	s.mu.Lock()
 	s.observe(StageLockWait, start)
-	defer s.mu.Unlock()
+	var publish []MarketQuote
+	defer func() { s.mu.Unlock(); s.publishQuotes(publish) }()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -525,8 +567,12 @@ func (s *Service) placeSingle(ctx context.Context, o Order) error {
 	o.EngineID = result.OrderID
 	o.Status = Open
 	events := []Event{{Type: EventOrder, Order: o}}
-	events = append(events, s.buildTradeEvents(o.MarketID, result.Trades, map[uint32]string{o.EngineID: o.ID}, map[string]Order{o.ID: o})...)
-	return s.commitMany(ctx, events)
+	events = append(events, s.buildTradeEvents(o.MarketID, result.Trades, map[engineOrderKey]string{{o.MarketID, o.EngineID}: o.ID}, map[string]Order{o.ID: o})...)
+	if err := s.commitMany(ctx, events); err != nil {
+		return err
+	}
+	publish = s.readQuotes(ctx, []string{o.MarketID}, nil)
+	return nil
 }
 
 // prepareOrder only reads state. Batch callers separately track aggregate
@@ -587,16 +633,16 @@ func (s *Service) applyTrades(ctx context.Context, marketID string, trades []Eng
 	return s.commitMany(ctx, events)
 }
 
-func (s *Service) buildTradeEvents(marketID string, trades []EngineTrade, engineOverrides map[uint32]string, staged map[string]Order) []Event {
+func (s *Service) buildTradeEvents(marketID string, trades []EngineTrade, engineOverrides map[engineOrderKey]string, staged map[string]Order) []Event {
 	var events []Event
 	if staged == nil {
 		staged = make(map[string]Order)
 	}
 	lookup := func(engineID uint32) (string, bool) {
-		if id, ok := engineOverrides[engineID]; ok {
+		if id, ok := engineOverrides[engineOrderKey{marketID, engineID}]; ok {
 			return id, true
 		}
-		id, ok := s.engineOrders[engineID]
+		id, ok := s.engineOrders[engineOrderKey{marketID, engineID}]
 		return id, ok
 	}
 	for _, fill := range trades {
@@ -641,7 +687,8 @@ func (s *Service) fillEvents(staged map[string]Order, id string, qty, enginePric
 }
 func (s *Service) Cancel(ctx context.Context, id, user string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	var publish []MarketQuote
+	defer func() { s.mu.Unlock(); s.publishQuotes(publish) }()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -659,7 +706,7 @@ func (s *Service) Cancel(ctx context.Context, id, user string) error {
 	if s.cfg.Engine != nil {
 		ok, err := s.cfg.Engine.RemoveOrder(ctx, m.Symbol, o.EngineID)
 		if err != nil {
-			return err
+			return s.fail(fmt.Errorf("uncertain cancellation: %w", err))
 		}
 		if !ok {
 			return errors.New("engine rejected cancellation")
@@ -681,7 +728,11 @@ func (s *Service) Cancel(ctx context.Context, id, user string) error {
 		}
 		events = append(events, Event{Type: EventPosition, UserID: o.UserID, MarketID: o.MarketID, YesDelta: yesDelta, NoDelta: noDelta})
 	}
-	return s.commitMany(ctx, events)
+	if err := s.commitMany(ctx, events); err != nil {
+		return err
+	}
+	publish = s.readQuotes(ctx, []string{o.MarketID}, nil)
+	return nil
 }
 func (s *Service) Resolve(ctx context.Context, id string, yes bool) error {
 	return s.ResolveFor(ctx, id, yes, "")
@@ -689,7 +740,8 @@ func (s *Service) Resolve(ctx context.Context, id string, yes bool) error {
 
 func (s *Service) ResolveFor(ctx context.Context, id string, yes bool, ownerID string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	var publish []MarketQuote
+	defer func() { s.mu.Unlock(); s.publishQuotes(publish) }()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -716,7 +768,7 @@ func (s *Service) ResolveFor(ctx context.Context, id string, yes bool, ownerID s
 		if s.cfg.Engine != nil {
 			removed, err := s.cfg.Engine.RemoveOrder(ctx, m.Symbol, o.EngineID)
 			if err != nil {
-				return fmt.Errorf("cancel order %s before resolution: %w", orderID, err)
+				return s.fail(fmt.Errorf("cancel order %s before resolution: %w", orderID, err))
 			}
 			if !removed {
 				return fmt.Errorf("engine rejected cancellation for order %s", orderID)
@@ -761,11 +813,16 @@ func (s *Service) ResolveFor(ctx context.Context, id string, yes bool, ownerID s
 		m.Status = ResolvedNo
 	}
 	events = append(events, Event{Type: EventMarket, Market: m})
-	return s.commitMany(ctx, events)
+	if err := s.commitMany(ctx, events); err != nil {
+		return err
+	}
+	publish = []MarketQuote{{MarketID: id, Symbol: m.Symbol, Bid: -1, Ask: -1, Sequence: s.sequence}}
+	return nil
 }
 func (s *Service) RecoverEngine(ctx context.Context) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	var publish []MarketQuote
+	defer func() { s.mu.Unlock(); s.publishQuotes(publish) }()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -789,7 +846,7 @@ func (s *Service) RecoverEngine(ctx context.Context) error {
 		}
 	}
 	sort.Slice(orders, func(i, j int) bool { return orders[i].Sequence < orders[j].Sequence })
-	s.engineOrders = map[uint32]string{}
+	s.engineOrders = map[engineOrderKey]string{}
 	for _, o := range orders {
 		o.EngineID = 0
 		s.orders[o.ID] = o
@@ -813,6 +870,13 @@ func (s *Service) RecoverEngine(ctx context.Context) error {
 			return err
 		}
 	}
+	var markets []string
+	for id, m := range s.markets {
+		if m.Status == Open {
+			markets = append(markets, id)
+		}
+	}
+	publish = s.readQuotes(ctx, markets, nil)
 	return nil
 }
 func (s *Service) Balance(user string) int64 {
@@ -862,7 +926,7 @@ func (s *Service) loadSnapshot() error {
 	s.sequence, s.markets, s.orders, s.balances, s.positions = state.Sequence, state.Markets, state.Orders, state.Balances, state.Positions
 	for id, o := range s.orders {
 		if o.EngineID != 0 && (o.Status == Pending || o.Status == Open || o.Status == Partial) {
-			s.engineOrders[o.EngineID] = id
+			s.engineOrders[engineOrderKey{o.MarketID, o.EngineID}] = id
 		}
 	}
 	return nil
