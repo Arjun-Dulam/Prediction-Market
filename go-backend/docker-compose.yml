@@ -43,6 +43,7 @@ services:
     environment:
       PORT: 8080
       ENGINE_ADDR: engine:50051
+      ENGINE_RPC_BATCH: ${ENGINE_RPC_BATCH:-true}
       REDIS_ADDR: redis:6379
       JWT_SECRET: ${JWT_SECRET:-development-secret-change-me}
       SNAPSHOT_INTERVAL: ${SNAPSHOT_INTERVAL:-30s}
