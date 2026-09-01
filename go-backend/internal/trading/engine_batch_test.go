@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 type groupedEngine struct {
@@ -164,5 +165,39 @@ func TestSharedWalletReservationCannotOverdrawAcrossMarkets(t *testing.T) {
 	outcomes := s.placeBatch(placements(Order{ID: "a", UserID: "yes", MarketID: "m", Side: BuyYes, Price: 60, Quantity: 10}, Order{ID: "b", UserID: "yes", MarketID: "b", Side: BuyYes, Price: 60, Quantity: 10}))
 	if outcomes[0] != nil || outcomes[1] == nil || s.Balance("yes") != 400 {
 		t.Fatalf("overdraw %v balance=%d", outcomes, s.Balance("yes"))
+	}
+}
+
+func (e *groupedEngine) Quote(_ context.Context, symbol string) (EngineQuote, error) {
+	return EngineQuote{Symbol: symbol, Bid: 40, Ask: 60}, nil
+}
+func TestQuoteSnapshotAndPublisherObserveCommittedState(t *testing.T) {
+	e := &groupedEngine{}
+	s := batchService(t, e)
+	published := make(chan MarketQuote, 1)
+	s.cfg.PublishQuotes = func(quotes []MarketQuote) {
+		// Taking another service read lock must work: publication is outside mu.
+		if balance := s.Balance("yes"); balance != 950 {
+			t.Errorf("publisher saw uncommitted balance %d", balance)
+		}
+		published <- quotes[0]
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := s.Place(ctx, Order{ID: "quoted", UserID: "yes", MarketID: "m", Side: BuyYes, Price: 50, Quantity: 1}); err != nil {
+		t.Fatal(err)
+	}
+	q := <-published
+	snapshot, err := s.Quote(ctx, "BATCH")
+	if err != nil || q.Sequence != snapshot.Sequence || snapshot.Bid != 40 {
+		t.Fatalf("%+v %+v %v", q, snapshot, err)
+	}
+	e.fail = true
+	outcome := s.placeBatch(placements(Order{ID: "uncertain", UserID: "yes", MarketID: "m", Side: BuyYes, Price: 50, Quantity: 1}))[0]
+	if !errors.Is(outcome, ErrRecoveryRequired) {
+		t.Fatal(outcome)
+	}
+	if _, err = s.Quote(ctx, "BATCH"); !errors.Is(err, ErrRecoveryRequired) {
+		t.Fatal("exposed uncertain engine state")
 	}
 }

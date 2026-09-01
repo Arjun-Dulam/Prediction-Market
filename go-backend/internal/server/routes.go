@@ -416,6 +416,20 @@ func (s *Server) quoteHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if s.trading != nil {
+		q, err := s.trading.Quote(ctx, symbol)
+		if err != nil {
+			http.Error(w, "quote snapshot unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		quote := cache.Quote{Bid: q.Bid, Ask: q.Ask, Sequence: q.Sequence, UpdatedAt: time.Now().UTC()}
+		if s.quotes != nil {
+			_, _ = s.quotes.SetVersioned(ctx, symbol, quote)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(quote)
+		return
+	}
 	bid, err := s.engine.BestBid(ctx, symbol)
 	if err != nil {
 		http.Error(w, "matching engine unavailable", http.StatusBadGateway)
