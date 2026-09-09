@@ -1,0 +1,9 @@
+{
+  "source": "75fd932",
+  "phase": "one owner SIGKILL then authenticated order",
+  "expected_http_status": 503,
+  "actual_http_status": 400,
+  "response": "context deadline exceeded",
+  "passed": false,
+  "cause": "caller deadline can win before admitted worker reports its engine uncertainty; timeout incorrectly classified as invalid order"
+}

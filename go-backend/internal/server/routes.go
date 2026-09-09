@@ -173,7 +173,7 @@ func (s *Server) durableOrderHandler(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	if err := s.trading.Place(ctx, trading.Order{ID: req.ID, UserID: req.UserID, MarketID: req.MarketID, Side: req.Side, Price: req.Price, Quantity: req.Quantity}); err != nil {
 		status := http.StatusBadRequest
-		if errors.Is(err, trading.ErrRecoveryRequired) || errors.Is(err, trading.ErrOrderQueueFull) {
+		if errors.Is(err, trading.ErrRecoveryRequired) || errors.Is(err, trading.ErrOrderQueueFull) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			status = http.StatusServiceUnavailable
 		}
 		http.Error(w, err.Error(), status)
