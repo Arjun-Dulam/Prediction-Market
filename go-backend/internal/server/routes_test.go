@@ -4,9 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"go-backend/internal/trading"
+	"go-backend/internal/ws"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -114,4 +118,76 @@ func BenchmarkOrderSubmission(b *testing.B) {
 		}
 	})
 	b.StopTimer()
+}
+
+// The HTTP deadline may end after durable reservation but before the group's
+// independent engine operation finishes. That is retryable, not invalid input.
+type delayedTradingEngine struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (e *delayedTradingEngine) AddBook(context.Context, string) error { return nil }
+func (e *delayedTradingEngine) RemoveOrder(context.Context, string, uint32) (bool, error) {
+	return true, nil
+}
+func (e *delayedTradingEngine) AddOrder(ctx context.Context, _ string, _ int32, _ uint32, _ string) (trading.EngineResult, error) {
+	e.entered <- struct{}{}
+	select {
+	case <-e.release:
+		return trading.EngineResult{OrderID: 1}, nil
+	case <-ctx.Done():
+		return trading.EngineResult{}, ctx.Err()
+	}
+}
+func TestAdmittedOrderHTTPTimeoutIsRetryableAndRetainsReservation(t *testing.T) {
+	for _, deadline := range []bool{false, true} {
+		t.Run(map[bool]string{false: "cancelled", true: "deadline"}[deadline], func(t *testing.T) {
+			e := &delayedTradingEngine{entered: make(chan struct{}, 1), release: make(chan struct{})}
+			service, err := trading.NewWithConfig(trading.Config{WALPath: filepath.Join(t.TempDir(), "wal"), Sync: true, Engine: e, OrderBatchSize: 32})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { service.Close() })
+			if err = service.CreateMarket("m", "M"); err != nil {
+				t.Fatal(err)
+			}
+			if err = service.Deposit("u", 100); err != nil {
+				t.Fatal(err)
+			}
+			var ctx context.Context
+			var cancel context.CancelFunc
+			if deadline {
+				ctx, cancel = context.WithTimeout(context.Background(), 200*time.Millisecond)
+			} else {
+				ctx, cancel = context.WithCancel(context.Background())
+			}
+			defer cancel()
+			request := httptest.NewRequest("POST", "/api/v1/trading/orders", strings.NewReader(`{"id":"o","user_id":"u","market_id":"m","side":"buy_yes","price":50,"quantity":1}`)).WithContext(ctx)
+			recorder := httptest.NewRecorder()
+			done := make(chan struct{})
+			server := &Server{trading: service, hub: ws.NewHub()}
+			go func() { server.durableOrderHandler(recorder, request); close(done) }()
+			select {
+			case <-e.entered:
+			case <-time.After(time.Second):
+				close(e.release)
+				t.Fatal("order was not admitted")
+			}
+			if !deadline {
+				cancel()
+			}
+			<-done
+			if recorder.Code != 503 {
+				close(e.release)
+				t.Fatalf("HTTP %d: %s", recorder.Code, recorder.Body.String())
+			}
+			close(e.release)
+			service.Close() // Wait for admitted work to finish despite the HTTP timeout.
+			o, ok := service.Order("o")
+			if !ok || o.Status != trading.Open || service.Balance("u") != 50 {
+				t.Fatalf("admitted order did not finish exactly once: %+v", o)
+			}
+		})
+	}
 }
