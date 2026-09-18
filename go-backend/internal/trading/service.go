@@ -578,6 +578,11 @@ func (s *Service) placeSingle(ctx context.Context, o Order) error {
 // prepareOrder only reads state. Batch callers separately track aggregate
 // reservations, so concurrent orders cannot collectively overdraw cash/shares.
 func (s *Service) prepareOrder(o Order) ([]Event, error) {
+	// Quantity crosses a uint32 protobuf boundary; reject before reserving cash
+	// rather than silently truncating or overflowing price * quantity.
+	if uint64(o.Quantity) > uint64(^uint32(0)) {
+		return nil, errors.New("quantity exceeds engine limit")
+	}
 	if o.ID == "" || o.UserID == "" || o.Quantity <= 0 {
 		return nil, errors.New("id, user and positive quantity are required")
 	}
