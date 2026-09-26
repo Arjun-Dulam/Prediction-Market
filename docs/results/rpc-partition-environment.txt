@@ -1,0 +1,5 @@
+Source75fd932; same host and Docker resources as rpc-environment.txt; ENGINE_ADDRS=engine:50051,engine_b:50051
+$ docker image inspect pme-audit-api:latest pme-audit-engine:latest pme-audit-engine_b:latest --format {{.RepoTags}} {{.Id}}
+[pme-audit-api:latest] sha256:6973cbc4f19902c5b2b1449748f9c0846200fac1f0f9b486ec5def535850dc66
+[pme-audit-engine:latest] sha256:ce4e820ecf8114e0bbd084e0d7e6f1d2f765658e740317b1a9e7c41044d15e28
+[pme-audit-engine_b:latest] sha256:37e8fa37ae2df0d6784dcf25219095379e45e203eac9ef97f0fe3ee35e098c6e
