@@ -124,13 +124,19 @@ See [the performance report](../docs/performance-optimization.md) for the
 verified **807 → 2,678 authenticated orders/s** improvement at 64 clients,
 p50/p95/p99, raw data and reproduction commands. The
 [systems audit](../docs/systems-audit.md) preserves earlier results and recovery work.
+The [RPC and local-partition report](../docs/local-market-partitions.md) records
+newer repeated measurements and an optional two-engine Docker experiment.
+Use `-markets 8 -accounts shared` or `-accounts independent` to measure many books
+with shared or separate wallet pairs. One Go ledger remains authoritative.
+See the [study guide](../docs/interview-study-guide.md) for related reading/exercises.
+
 Historical claims of 595 HTTP orders/sec and 3.73M in-process C++ orders/sec
 should be reproduced before use; they are not guaranteed current results.
 
 New WAL writes frame complete business event batches in a single versioned record.
 Replay discards and truncates an incomplete trailing record and rejects complete
 corrupt records. After a WAL/projection or ambiguous engine RPC error, readiness and new orders fail until
-both API and engine are restarted. Preserve `orders.wal.previous` together with
+the API and all configured engine owners are restarted. Preserve `orders.wal.previous` together with
 `orders.wal` and the snapshot during backup/recovery; its prefix is deleted only
 after a durable checkpoint. This prevents retries or snapshots from
 compounding uncertain state. Keep PostgreSQL and API volumes together: snapshots
@@ -143,3 +149,24 @@ tests, and production container builds.
 This is an exchange systems project, not a real-money service. External payment
 custody, administrator roles, outcome-oracle verification, and regulatory controls
 are deliberately outside its scope; do not expose the demo funding endpoint publicly.
+
+## Local engine-owner experiment
+
+The default deployment uses one engine. `ENGINE_RPC_BATCH=true` (default) sends
+ordered groups of up to 32 commands; `false` keeps individual calls as a control.
+Quotes carry a decimal-string `sequence`; clients should compare sequence values
+rather than arrival time, and JavaScript clients should use BigInt for full-width
+comparison. Redis publication is best effort after the durable commit.
+
+For two statically assigned C++ owners, keep the same database/Go ledger and run:
+
+```bash
+docker compose -p pme-audit -f docker-compose.yml -f docker-compose.partitioned.yml up -d --build --wait
+```
+
+`ENGINE_ADDRS=engine:50051,engine_b:50051` routes each symbol by FNV-1a modulo two.
+This is an experiment with partitioned matching; the Go admission worker, wallet
+reservations, WAL and SQL projection remain serialized. Restart all engines with
+the API for recovery, and rebuild all owners before changing endpoint assignment.
+Do not scale the API replicas or share its authoritative volume between writers.
+The report includes workload commands, results, failure checks and cleanup.
