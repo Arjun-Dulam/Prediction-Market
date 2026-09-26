@@ -1,0 +1,7 @@
+Test project /Users/adulam/Desktop/Prediction-Market-Exchange/build-audit/engine
+    Start 1: OrderBookTests
+1/1 Test #1: OrderBookTests ...................   Passed    0.54 sec
+
+100% tests passed out of 1
+
+Total Test time (real) =   0.58 sec
