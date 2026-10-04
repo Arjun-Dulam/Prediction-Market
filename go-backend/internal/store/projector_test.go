@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"sync"
 	"testing"
 	"time"
 
@@ -76,4 +77,102 @@ func TestPostgresProjectionIsAtomicAndIdempotent(t *testing.T) {
 	if balance != 450 || yes != 10 || status != string(trading.Filled) || ownerID != "creator" || trades != 1 || eventCount != len(events) {
 		t.Fatalf("projection balance=%d yes=%d status=%s owner=%s trades=%d events=%d", balance, yes, status, ownerID, trades, eventCount)
 	}
+	t.Run("mixed replay and duplicate within batch", func(t *testing.T) {
+		extra := []trading.Event{events[4], {ID: "mixed-credit", Sequence: 7, Type: trading.EventBalance, UserID: "u", Amount: 10}, {ID: "mixed-position", Sequence: 8, Type: trading.EventPosition, UserID: "u", MarketID: "m", YesDelta: 2}}
+		extra = append(extra, extra[1], extra[2])
+		if err := projector.ApplyBatch(ctx, extra); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.QueryRowContext(ctx, `SELECT cents FROM balances WHERE user_id='u'`).Scan(&balance); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.QueryRowContext(ctx, `SELECT yes_shares FROM positions WHERE user_id='u' AND market_id='m'`).Scan(&yes); err != nil {
+			t.Fatal(err)
+		}
+		if balance != 460 || yes != 12 {
+			t.Fatalf("repeated effects: balance=%d yes=%d", balance, yes)
+		}
+	})
+	t.Run("debit checks each intermediate state", func(t *testing.T) {
+		bad := []trading.Event{
+			{ID: "rollback-credit", Sequence: 9, Type: trading.EventBalance, UserID: "u", Amount: 100},
+			{ID: "rollback-debit", Sequence: 10, Type: trading.EventBalance, UserID: "u", Amount: -1000},
+			{ID: "rollback-later-credit", Sequence: 11, Type: trading.EventBalance, UserID: "u", Amount: 1000},
+		}
+		if err := projector.ApplyBatch(ctx, bad); err == nil {
+			t.Fatal("insufficient intermediate balance accepted")
+		}
+		if err := db.QueryRowContext(ctx, `SELECT cents FROM balances WHERE user_id='u'`).Scan(&balance); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM order_events WHERE event_id LIKE 'rollback-%'`).Scan(&eventCount); err != nil {
+			t.Fatal(err)
+		}
+		if balance != 460 || eventCount != 0 {
+			t.Fatalf("partial transaction persisted: balance=%d events=%d", balance, eventCount)
+		}
+	})
+	t.Run("SQL failure rolls back admitted IDs and prior effects", func(t *testing.T) {
+		badOrder := events[2]
+		badOrder.ID = "constraint-order"
+		badOrder.Order.ID = "invalid"
+		badOrder.Order.Quantity = 0
+		credit := trading.Event{ID: "constraint-credit", Sequence: 12, Type: trading.EventBalance, UserID: "u", Amount: 20}
+		if err := projector.ApplyBatch(ctx, []trading.Event{credit, badOrder}); err == nil {
+			t.Fatal("invalid order accepted")
+		}
+		if err := db.QueryRowContext(ctx, `SELECT cents FROM balances WHERE user_id='u'`).Scan(&balance); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM order_events WHERE event_id LIKE 'constraint-%'`).Scan(&eventCount); err != nil {
+			t.Fatal(err)
+		}
+		if balance != 460 || eventCount != 0 {
+			t.Fatalf("partial transaction persisted: balance=%d events=%d", balance, eventCount)
+		}
+	})
+	t.Run("concurrent duplicate admission", func(t *testing.T) {
+		credit := trading.Event{ID: "concurrent-credit", Sequence: 13, Type: trading.EventBalance, UserID: "u", Amount: 7}
+		var workers sync.WaitGroup
+		errors := make(chan error, 16)
+		for i := 0; i < 16; i++ {
+			workers.Add(1)
+			go func() { defer workers.Done(); errors <- projector.Apply(ctx, credit) }()
+		}
+		workers.Wait()
+		close(errors)
+		for err := range errors {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := db.QueryRowContext(ctx, `SELECT cents FROM balances WHERE user_id='u'`).Scan(&balance); err != nil {
+			t.Fatal(err)
+		}
+		if balance != 467 {
+			t.Fatalf("duplicate credit: %d", balance)
+		}
+	})
+	t.Run("cancelled context leaves connection reusable", func(t *testing.T) {
+		db.SetMaxOpenConns(1)
+		cancelled, stop := context.WithCancel(ctx)
+		stop()
+		credit := trading.Event{ID: "cancelled-credit", Sequence: 14, Type: trading.EventBalance, UserID: "u", Amount: 11}
+		if err := projector.Apply(cancelled, credit); err == nil {
+			t.Fatal("cancelled operation succeeded")
+		}
+		if err := projector.Apply(ctx, credit); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.QueryRowContext(ctx, `SELECT cents FROM balances WHERE user_id='u'`).Scan(&balance); err != nil {
+			t.Fatal(err)
+		}
+		if balance != 478 {
+			t.Fatalf("cancelled credit persisted: %d", balance)
+		}
+	})
+
 }
+
+// The native pgx batch must preserve SQL ordering, atomicity and deduplication
+// while returning its borrowed connection to database/sql in a usable state.

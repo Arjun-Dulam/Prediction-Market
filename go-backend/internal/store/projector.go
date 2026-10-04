@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 	"go-backend/internal/trading"
 )
 
@@ -42,65 +44,117 @@ func (p *Projector) Migrate(ctx context.Context) error {
 	return nil
 }
 
-// Apply is idempotent by event sequence. The event row and materialized views
-// are committed in one transaction.
+// Apply is idempotent by event ID. Admission and all materialized changes
+// remain in one synchronous PostgreSQL transaction.
 func (p *Projector) Apply(ctx context.Context, e trading.Event) error {
 	return p.ApplyBatch(ctx, []trading.Event{e})
 }
 
-// ApplyBatch amortizes transaction and fsync overhead while preserving the
-// same atomic, sequence-idempotent projection semantics as Apply.
+// ApplyBatch admits new event IDs in one statement, then pipelines their ordered
+// effects. Raw borrows the existing database/sql connection; it creates no second
+// pool. No materialized change can commit without its deduplication row.
 func (p *Projector) ApplyBatch(ctx context.Context, events []trading.Event) error {
-	tx, err := p.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	for _, e := range events {
-		if err := projectEvent(ctx, tx, e); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}
-
-func projectEvent(ctx context.Context, tx *sql.Tx, e trading.Event) error {
-	payload, err := json.Marshal(e)
-	if err != nil {
-		return err
-	}
-	result, err := tx.ExecContext(ctx, `INSERT INTO order_events(event_id,sequence,event) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, e.ID, e.Sequence, payload)
-	if err != nil {
-		return err
-	}
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
+	if len(events) == 0 {
 		return nil
 	}
-	switch e.Type {
-	case trading.EventMarket:
-		_, err = tx.ExecContext(ctx, `INSERT INTO markets(id,symbol,owner_id,status) VALUES($1,$2,$3,$4) ON CONFLICT(id) DO UPDATE SET symbol=EXCLUDED.symbol,owner_id=EXCLUDED.owner_id,status=EXCLUDED.status`, e.Market.ID, e.Market.Symbol, nullable(e.Market.OwnerID), e.Market.Status)
-	case trading.EventBalance:
-		err = changeBalance(ctx, tx, e.UserID, e.Amount)
-	case trading.EventOrder:
-		o := e.Order
-		_, err = tx.ExecContext(ctx, `INSERT INTO orders(id,user_id,market_id,side,engine_order_id,engine_price,price,quantity,filled_quantity,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(id) DO UPDATE SET engine_order_id=EXCLUDED.engine_order_id,filled_quantity=EXCLUDED.filled_quantity,status=EXCLUDED.status`, o.ID, o.UserID, o.MarketID, o.Side, o.EngineID, o.EnginePrice, o.Price, o.Quantity, o.FilledQuantity, o.Status)
-		if err == nil && e.Amount != 0 {
-			err = changeBalance(ctx, tx, e.UserID, e.Amount)
-		}
-	case trading.EventPosition:
-		_, err = tx.ExecContext(ctx, `INSERT INTO positions(user_id,market_id,yes_shares,no_shares) VALUES($1,$2,$3,$4) ON CONFLICT(user_id,market_id) DO UPDATE SET yes_shares=positions.yes_shares+EXCLUDED.yes_shares,no_shares=positions.no_shares+EXCLUDED.no_shares`, e.UserID, e.MarketID, e.YesDelta, e.NoDelta)
-		if err == nil && e.Amount != 0 {
-			err = changeBalance(ctx, tx, e.UserID, e.Amount)
-		}
-	case trading.EventTrade:
-		t := e.Trade
-		_, err = tx.ExecContext(ctx, `INSERT INTO trades(event_id,sequence,market_id,buy_order_id,sell_order_id,price,quantity) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`, e.ID, e.Sequence, t.MarketID, t.BuyOrderID, t.SellOrderID, t.Price, t.Quantity)
-	}
+	payload, err := json.Marshal(events)
 	if err != nil {
 		return err
 	}
-	return nil
+	conn, err := p.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	return conn.Raw(func(driverConn any) error {
+		native, ok := driverConn.(*stdlib.Conn)
+		if !ok {
+			return fmt.Errorf("projection requires the pgx SQL driver")
+		}
+		tx, err := native.Conn().Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback(ctx)
+		rows, err := tx.Query(ctx, `INSERT INTO order_events(event_id,sequence,event)
+   SELECT value->>'id',(value->>'sequence')::bigint,value
+   FROM jsonb_array_elements($1::jsonb)
+   ON CONFLICT(event_id) DO NOTHING RETURNING event_id`, payload)
+		if err != nil {
+			return err
+		}
+		admitted := make(map[string]bool, len(events))
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			admitted[id] = true
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		batch := &pgx.Batch{}
+		// A nonempty entry marks a debit whose affected-row count must be checked.
+		var debitUsers []string
+		queue := func(debitUser, sql string, args ...any) {
+			batch.Queue(sql, args...)
+			debitUsers = append(debitUsers, debitUser)
+		}
+		balance := func(user string, delta int64) {
+			if delta >= 0 {
+				queue("", `INSERT INTO balances(user_id,cents) VALUES($1,$2) ON CONFLICT(user_id) DO UPDATE SET cents=balances.cents+$2`, user, delta)
+			} else {
+				queue(user, `UPDATE balances SET cents=cents+$2 WHERE user_id=$1 AND cents+$2>=0`, user, delta)
+			}
+		}
+		for _, e := range events {
+			if !admitted[e.ID] {
+				continue
+			}
+			delete(admitted, e.ID) // repeated IDs within this batch apply once, too
+			switch e.Type {
+			case trading.EventMarket:
+				queue("", `INSERT INTO markets(id,symbol,owner_id,status) VALUES($1,$2,$3,$4) ON CONFLICT(id) DO UPDATE SET symbol=EXCLUDED.symbol,owner_id=EXCLUDED.owner_id,status=EXCLUDED.status`, e.Market.ID, e.Market.Symbol, nullable(e.Market.OwnerID), e.Market.Status)
+			case trading.EventBalance:
+				balance(e.UserID, e.Amount)
+			case trading.EventOrder:
+				o := e.Order
+				queue("", `INSERT INTO orders(id,user_id,market_id,side,engine_order_id,engine_price,price,quantity,filled_quantity,status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(id) DO UPDATE SET engine_order_id=EXCLUDED.engine_order_id,filled_quantity=EXCLUDED.filled_quantity,status=EXCLUDED.status`, o.ID, o.UserID, o.MarketID, o.Side, o.EngineID, o.EnginePrice, o.Price, o.Quantity, o.FilledQuantity, o.Status)
+				if e.Amount != 0 {
+					balance(e.UserID, e.Amount)
+				}
+			case trading.EventPosition:
+				queue("", `INSERT INTO positions(user_id,market_id,yes_shares,no_shares) VALUES($1,$2,$3,$4) ON CONFLICT(user_id,market_id) DO UPDATE SET yes_shares=positions.yes_shares+EXCLUDED.yes_shares,no_shares=positions.no_shares+EXCLUDED.no_shares`, e.UserID, e.MarketID, e.YesDelta, e.NoDelta)
+				if e.Amount != 0 {
+					balance(e.UserID, e.Amount)
+				}
+			case trading.EventTrade:
+				t := e.Trade
+				queue("", `INSERT INTO trades(event_id,sequence,market_id,buy_order_id,sell_order_id,price,quantity) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING`, e.ID, e.Sequence, t.MarketID, t.BuyOrderID, t.SellOrderID, t.Price, t.Quantity)
+			}
+		}
+		if batch.Len() > 0 {
+			results := tx.SendBatch(ctx, batch)
+			for _, user := range debitUsers {
+				tag, err := results.Exec()
+				if err != nil {
+					results.Close()
+					return err
+				}
+				if user != "" && tag.RowsAffected() != 1 {
+					results.Close()
+					return fmt.Errorf("insufficient projected balance for %q", user)
+				}
+			}
+			if err := results.Close(); err != nil {
+				return err
+			}
+		}
+		return tx.Commit(ctx)
+	})
 }
 
 func nullable(value string) any {
@@ -108,20 +162,4 @@ func nullable(value string) any {
 		return nil
 	}
 	return value
-}
-
-func changeBalance(ctx context.Context, tx *sql.Tx, user string, delta int64) error {
-	if delta >= 0 {
-		_, err := tx.ExecContext(ctx, `INSERT INTO balances(user_id,cents) VALUES($1,$2) ON CONFLICT(user_id) DO UPDATE SET cents=balances.cents+$2`, user, delta)
-		return err
-	}
-	result, err := tx.ExecContext(ctx, `UPDATE balances SET cents=cents+$2 WHERE user_id=$1 AND cents+$2>=0`, user, delta)
-	if err != nil {
-		return err
-	}
-	affected, _ := result.RowsAffected()
-	if affected != 1 {
-		return fmt.Errorf("insufficient projected balance for %q", user)
-	}
-	return nil
 }
