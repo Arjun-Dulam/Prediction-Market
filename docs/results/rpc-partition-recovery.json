@@ -1,0 +1,1 @@
+{"engine_instances": 2, "distinct_owners": [1, 0], "maker_engine_ids": [1, 1], "numeric_ids_overlap": true, "shared_wallet_no_overdraw": true, "parallel_retries": 32, "two_owner_SIGKILL_recovery": true, "single_owner_failure_freezes_ledger": true, "uncertain_reservation_recovered_once": true, "post_recovery_cancel_refunds": true, "versioned_quotes_after_cancel": true}

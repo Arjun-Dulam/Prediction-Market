@@ -1,0 +1,26 @@
+{
+  "samples": [
+    {
+      "seconds_since_first_sample": 0,
+      "go_goroutines": 20,
+      "go_heap_alloc_bytes": 48065608,
+      "go_heap_objects": 157549
+    },
+    {
+      "seconds_since_first_sample": 10,
+      "go_goroutines": 20,
+      "go_heap_alloc_bytes": 48128616,
+      "go_heap_objects": 158265
+    },
+    {
+      "seconds_since_first_sample": 20,
+      "go_goroutines": 20,
+      "go_heap_alloc_bytes": 48180624,
+      "go_heap_objects": 158971
+    }
+  ],
+  "health": {
+    "status": 200,
+    "body": "{\"database\":{\"idle\":\"2\",\"in_use\":\"0\",\"max_idle_closed\":\"0\",\"max_lifetime_closed\":\"0\",\"message\":\"It's healthy\",\"open_connections\":\"2\",\"status\":\"up\",\"wait_count\":\"0\",\"wait_duration\":\"0s\"},\"engine\":{\"status\":\"up\"},\"redis\":{\"status\":\"up\"},\"status\":\"up\"}"
+  }
+}

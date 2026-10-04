@@ -1,0 +1,47 @@
+$ git rev-parse HEAD
+75fd932b8873fb399254d0f68b7721029992494b
+
+$ sw_vers
+ProductName:		macOS
+ProductVersion:		27.0.1
+BuildVersion:		26A434
+
+$ sysctl hw.model hw.memsize hw.ncpu
+hw.model: Mac15,12
+hw.memsize: 25769803776
+hw.ncpu: 8
+
+$ docker info --format Docker {{.ServerVersion}}; architecture {{.Architecture}}; CPUs {{.NCPU}}; memory {{.MemTotal}} bytes
+Docker 29.8.1; architecture aarch64; CPUs 8; memory 8319770624 bytes
+
+$ docker image inspect pme-audit-api:timed-baseline pme-audit-api:sql-only pme-audit-api:latest pme-audit-engine:latest postgres:17-alpine redis:7-alpine --format {{.RepoTags}} {{.Id}}
+[pme-audit-api:timed-baseline] sha256:058f0b848bd4f605f29af73f00f713a3493bef2fa0b741945f3037639e834879
+[pme-audit-api:sql-only] sha256:59abb914b2e02d2da6848b2d3c6f88bf591aa2490b37da1ef1798cfe0ea5e71c
+[pme-audit-api:latest] sha256:1b70ebbb856d915be4d729c282bcd3f6f81318e73fa579f3455a931e9ef056a7
+[pme-audit-engine:latest] sha256:e1c6b77f4b6c06e21218b7495a42673184fffda17e0dc3e07265f58bd36c1105
+[postgres:17-alpine] sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+[redis:7-alpine] sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+
+$ docker exec pme-audit-psql_bp-1 psql -U exchange -d exchange -c SHOW fsync; SHOW synchronous_commit; SHOW full_page_writes;
+ fsync 
+-------
+ on
+(1 row)
+
+ synchronous_commit 
+--------------------
+ on
+(1 row)
+
+ full_page_writes 
+------------------
+ on
+(1 row)
+
+
+$ go version
+go version go1.27.1 darwin/arm64
+
+$ docker image inspect pme-audit-api:pre-rpc pme-audit-engine:pre-rpc --format {{.RepoTags}} {{.Id}}
+[pme-audit-api:pre-rpc] sha256:41fa72a4cc7c3c439c2c2b5399f52ca525af8a4776558a7d0176005dcec53600
+[pme-audit-engine:pre-rpc] sha256:10212f09579d9a10a3efd80e27ad43c7a68b8f33d86c919c2ab603f4e351ee18
