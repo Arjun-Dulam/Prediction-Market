@@ -1,0 +1,191 @@
+openapi: 3.1.0
+info:
+  title: Prediction Market Exchange API
+  version: 1.0.0
+  description: Durable binary-outcome trading API backed by PostgreSQL, Redis, and a C++ matching engine.
+servers:
+  - url: http://localhost:8080
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Credentials:
+      type: object
+      required: [email, password]
+      properties:
+        email: {type: string, format: email}
+        username: {type: string}
+        password: {type: string, minLength: 8}
+    Session:
+      type: object
+      required: [user_id, token]
+      properties:
+        user_id: {type: string, format: uuid}
+        token: {type: string}
+    Market:
+      type: object
+      required: [id, symbol]
+      properties:
+        id: {type: string}
+        symbol: {type: string}
+        owner_id: {type: string, format: uuid, readOnly: true}
+        status: {type: string, enum: [open, resolved_yes, resolved_no]}
+    OrderRequest:
+      type: object
+      required: [market_id, side, price, quantity]
+      properties:
+        id: {type: string, description: Optional idempotency key}
+        market_id: {type: string}
+        side: {type: string, enum: [buy_yes, buy_no, sell_yes, sell_no]}
+        price: {type: integer, minimum: 1, maximum: 99}
+        quantity: {type: integer, minimum: 1}
+paths:
+  /health:
+    get:
+      summary: Check API, PostgreSQL, Redis, and matching-engine readiness
+      responses:
+        "200": {description: All dependencies are ready}
+        "503": {description: A required dependency is unavailable}
+  /metrics:
+    get:
+      summary: Return Prometheus-compatible service metrics
+      responses:
+        "200": {description: Metrics exposition}
+  /api/v1/users/register:
+    post:
+      summary: Register a user and issue a JWT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/Credentials"}
+      responses:
+        "201":
+          description: Registered
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Session"}
+  /api/v1/users/login:
+    post:
+      summary: Authenticate and issue a JWT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/Credentials"}
+      responses:
+        "200":
+          description: Authenticated
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Session"}
+        "401": {description: Invalid credentials}
+  /api/v1/markets:
+    get:
+      summary: List markets
+      responses:
+        "200": {description: Markets}
+    post:
+      summary: Create a market
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/Market"}
+      responses:
+        "201": {description: Created}
+  /api/v1/markets/{id}:
+    get:
+      summary: Get a market
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        "200": {description: Market}
+        "404": {description: Not found}
+  /api/v1/markets/{id}/resolve:
+    post:
+      summary: Settle a binary market owned by the authenticated user
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [outcome]
+              properties:
+                outcome: {type: string, enum: [yes, no]}
+      responses:
+        "204": {description: Settled}
+        "403": {description: Authenticated user does not own this market}
+  /api/v1/trading/orders:
+    post:
+      summary: Place an idempotent limit order
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/OrderRequest"}
+      responses:
+        "201": {description: Accepted}
+        "400": {description: Invalid order or insufficient funds/inventory}
+  /api/v1/trading/orders/{id}:
+    get:
+      summary: Get an owned order
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        "200": {description: Order}
+        "403": {description: Not owner}
+    delete:
+      summary: Cancel an owned open order
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        "204": {description: Cancelled}
+  /api/v1/balances/deposit:
+    post:
+      summary: Credit the authenticated demo account
+      security: [{bearerAuth: []}]
+      responses:
+        "204": {description: Credited}
+  /api/v1/balances/{userID}:
+    get:
+      summary: Get the authenticated user's balance
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: userID, in: path, required: true, schema: {type: string}}
+      responses:
+        "200": {description: Balance}
+  /api/v1/positions/{userID}/{marketID}:
+    get:
+      summary: Get an owned market position
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: userID, in: path, required: true, schema: {type: string}}
+        - {name: marketID, in: path, required: true, schema: {type: string}}
+      responses:
+        "200": {description: Position}
+  /api/v1/markets/{symbol}/quote:
+    get:
+      summary: Get the Redis-cached best bid and ask
+      parameters:
+        - {name: symbol, in: path, required: true, schema: {type: string}}
+      responses:
+        "200": {description: Quote}
+  /ws:
+    get:
+      summary: Upgrade to a market event WebSocket
+      parameters:
+        - {name: channel, in: query, required: true, schema: {type: string}}
+      responses:
+        "101": {description: Switching protocols}

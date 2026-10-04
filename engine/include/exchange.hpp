@@ -39,7 +39,8 @@ class Exchange {
    * @param symbol the symbol corresponding to the order
    * @param order the order to be executed/added to orderbook
    */
-  uint32_t add_order(std::string symbol, Order& Order);
+  uint32_t add_order(std::string symbol, Order& Order,
+                     std::vector<Trade>* executed_trades = nullptr);
 
   /**
    * @brief Method meant to be called upon by clients, not other methods. This

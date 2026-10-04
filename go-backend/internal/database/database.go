@@ -22,7 +22,10 @@ type Service interface {
 	// Close terminates the database connection.
 	// It returns an error if the connection cannot be closed.
 	Close() error
+	DB() *sql.DB
 }
+
+func (s *service) DB() *sql.DB { return s.db }
 
 type service struct {
 	db *sql.DB
@@ -67,7 +70,6 @@ func (s *service) Health() map[string]string {
 	if err != nil {
 		stats["status"] = "down"
 		stats["error"] = fmt.Sprintf("db down: %v", err)
-		log.Fatalf("db down: %v", err) // Log the error and terminate the program
 		return stats
 	}
 

@@ -15,6 +15,7 @@
 
 # C++ build directories
 build/
+build-*/
 out/
 engine/build/
 engine/cmake-build-debug/

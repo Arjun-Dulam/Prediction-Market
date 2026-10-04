@@ -23,7 +23,8 @@ void Exchange::remove_book(std::string symbol) {
   return;
 }
 
-uint32_t Exchange::add_order(std::string symbol, Order& order) {
+uint32_t Exchange::add_order(std::string symbol, Order& order,
+                             std::vector<Trade>* executed_trades) {
   order.order_id = next_order_id++;
   std::shared_lock<std::shared_mutex> lock(mutex_);
   auto orderbook = symbol_map.find(symbol);
@@ -32,7 +33,7 @@ uint32_t Exchange::add_order(std::string symbol, Order& order) {
     return 0;
   }
 
-  orderbook->second->queue_.push(order);
+  orderbook->second->add_order(order, executed_trades);
   return order.order_id;
 }
 

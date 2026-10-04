@@ -1,0 +1,54 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: go-backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go-backend/go.mod
+          cache-dependency-path: go-backend/go.sum
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+
+  cpp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update
+      - run: sudo apt-get install -y cmake libabsl-dev libgrpc++-dev libprotobuf-dev libssl-dev protobuf-compiler protobuf-compiler-grpc
+      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DEXCHANGE_BUILD_BENCHMARKS=OFF
+      - run: cmake --build build --target OrderBookTests MatchingEngineServer -j2
+      - run: ctest --test-dir build/engine --output-on-failure
+
+  containers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Compose
+        working-directory: go-backend
+        env:
+          BLUEPRINT_DB_DATABASE: exchange
+          BLUEPRINT_DB_USERNAME: exchange
+          BLUEPRINT_DB_PASSWORD: exchange
+          BLUEPRINT_DB_PORT: "5432"
+        run: docker compose config --quiet
+      - name: Build production images
+        working-directory: go-backend
+        env:
+          BLUEPRINT_DB_DATABASE: exchange
+          BLUEPRINT_DB_USERNAME: exchange
+          BLUEPRINT_DB_PASSWORD: exchange
+          BLUEPRINT_DB_PORT: "5432"
+        run: docker compose build api engine
