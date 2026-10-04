@@ -31,7 +31,8 @@ pays the winning outcome at 100 cents per share. Cancellation and settlement
 events are committed in atomic WAL/database batches to avoid per-position fsyncs.
 
 Accepted state changes are appended and fsynced before acknowledgment. The API
-periodically snapshots materialized state and deterministically replays open
+periodically copies checkpoint state under the admission lock, writes it outside
+that lock, and rotates two crash-safe WAL segments. It deterministically replays open
 markets/orders into a restarted engine. PostgreSQL projection batches use unique
 event IDs, making WAL replay idempotent even when local sequence numbers restart.
 
@@ -57,7 +58,12 @@ curl http://localhost:8080/health
 
 Docker Compose waits for PostgreSQL and Redis health checks, starts the C++
 engine on port 50051, and exposes the Go API on port 8080. Durable files live in
-the `api_data` volume. `SNAPSHOT_INTERVAL` defaults to `30s`.
+the `api_data` volume. `SNAPSHOT_INTERVAL` defaults to `30s`. `ORDER_BATCH_SIZE` defaults to `32`
+(1–32): one worker drains already waiting orders with no batching timer, while
+retaining durable reservations before matching and completions before success.
+The queue holds at most 128 waiting orders; overload returns 503. See the
+[performance report](../docs/performance-optimization.md) for recovery semantics
+and reproducible comparisons.
 
 ## Trading API
 
@@ -114,15 +120,19 @@ outside the measured interval. WebSocket publication is included without subscri
 Use `-environment` to describe the host and server configuration and `-label` to
 identify the build. Exit status is nonzero for order or accounting failures.
 
-See [the systems audit](../docs/systems-audit.md) for **verified before-and-after
-results**, committed raw data, configuration, restart checks and limitations.
+See [the performance report](../docs/performance-optimization.md) for the
+verified **807 → 2,678 authenticated orders/s** improvement at 64 clients,
+p50/p95/p99, raw data and reproduction commands. The
+[systems audit](../docs/systems-audit.md) preserves earlier results and recovery work.
 Historical claims of 595 HTTP orders/sec and 3.73M in-process C++ orders/sec
 should be reproduced before use; they are not guaranteed current results.
 
 New WAL writes frame complete business event batches in a single versioned record.
 Replay discards and truncates an incomplete trailing record and rejects complete
-corrupt records. After a WAL/projection error, readiness and new orders fail until
-both API and engine are restarted. This prevents retries or snapshots from
+corrupt records. After a WAL/projection or ambiguous engine RPC error, readiness and new orders fail until
+both API and engine are restarted. Preserve `orders.wal.previous` together with
+`orders.wal` and the snapshot during backup/recovery; its prefix is deleted only
+after a durable checkpoint. This prevents retries or snapshots from
 compounding uncertain state. Keep PostgreSQL and API volumes together: snapshots
 alone cannot recreate a lost PostgreSQL database after WAL truncation.
 
