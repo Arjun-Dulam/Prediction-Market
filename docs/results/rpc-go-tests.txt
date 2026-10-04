@@ -1,0 +1,12 @@
+?   	go-backend/cmd/api	[no test files]
+ok  	go-backend/cmd/loadtest	0.378s
+ok  	go-backend/internal/auth	0.200s
+ok  	go-backend/internal/cache	3.107s
+ok  	go-backend/internal/database	3.777s
+ok  	go-backend/internal/engine	0.240s
+?   	go-backend/internal/engine/pb	[no test files]
+ok  	go-backend/internal/metrics	0.174s
+ok  	go-backend/internal/server	0.209s
+ok  	go-backend/internal/store	3.573s
+ok  	go-backend/internal/trading	2.669s
+ok  	go-backend/internal/ws	0.148s

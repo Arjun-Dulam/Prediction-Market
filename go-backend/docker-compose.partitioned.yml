@@ -1,0 +1,16 @@
+# Experimental static ownership: one Go ledger, two C++ market owners.
+# Use with docker-compose.yml. Each owner is a process, not an API replica.
+services:
+  engine_b:
+    build:
+      context: ..
+      dockerfile: engine/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "50052:50051"
+  api:
+    environment:
+      ENGINE_ADDRS: engine:50051,engine_b:50051
+    depends_on:
+      engine_b:
+        condition: service_started

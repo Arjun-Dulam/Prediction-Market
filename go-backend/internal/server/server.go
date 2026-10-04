@@ -38,9 +38,9 @@ func NewServer() *http.Server {
 	if port == 0 {
 		port = 8080
 	}
-	matchingEngine, err := engine.New(os.Getenv("ENGINE_ADDR"))
+	matchingEngine, err := engine.NewRouter(envOr("ENGINE_ADDRS", envOr("ENGINE_ADDR", "localhost:50051")))
 	if err != nil {
-		matchingEngine, _ = engine.New("localhost:50051")
+		panic(fmt.Sprintf("initialize engine routing: %v", err))
 	}
 
 	db := database.New()
@@ -63,9 +63,10 @@ func NewServer() *http.Server {
 		batchSize = value
 	}
 	registry := metrics.New()
+	api := &Server{port: port, db: db, engine: matchingEngine, hub: ws.NewHub(), quotes: cache.NewRedisQuotes(envOr("REDIS_ADDR", "localhost:6379")), auth: authService, metrics: registry}
 	durable, err := trading.NewWithConfig(trading.Config{
 		WALPath: "data/orders.wal", SnapshotPath: "data/orderbook.snapshot",
-		Engine: engine.TradingAdapter{Client: matchingEngine}, Projector: projector, Sync: true, Observe: registry.Observe, OrderBatchSize: batchSize,
+		Engine: matchingEngine.Trading(), Projector: projector, Sync: true, Observe: registry.Observe, OrderBatchSize: batchSize, DisableEngineBatch: envOr("ENGINE_RPC_BATCH", "true") == "false", PublishQuotes: api.publishQuotes,
 	})
 	if err != nil {
 		panic(fmt.Sprintf("initialize durable state: %v", err))
@@ -78,17 +79,7 @@ func NewServer() *http.Server {
 		_ = durable.Close()
 		panic(fmt.Sprintf("recover matching engine state: %v", err))
 	}
-	api := &Server{
-		port: port,
-
-		db:      db,
-		engine:  matchingEngine,
-		trading: durable,
-		hub:     ws.NewHub(),
-		quotes:  cache.NewRedisQuotes(envOr("REDIS_ADDR", "localhost:6379")),
-		auth:    authService,
-		metrics: registry,
-	}
+	api.trading = durable
 	snapshotStop := make(chan struct{})
 	snapshotDone := make(chan struct{})
 	go func() {

@@ -17,12 +17,33 @@ type RedisQuotes struct {
 func NewRedisQuotes(addr string) *RedisQuotes {
 	return &RedisQuotes{client: redis.NewClient(&redis.Options{Addr: addr}), ttl: time.Minute}
 }
+
+// Compare decimal strings rather than Lua doubles, preserving all uint64 values.
+var setQuote = redis.NewScript(`
+local old = redis.call('GET', KEYS[1])
+if old then
+  local decoded = cjson.decode(old)
+  local previous = decoded.sequence or '0'
+  local next = ARGV[2]
+  if string.len(previous) > string.len(next) or
+     (string.len(previous) == string.len(next) and previous >= next) then return 0 end
+end
+redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[3])
+return 1
+`)
+
 func (r *RedisQuotes) Set(ctx context.Context, market string, q Quote) error {
+	_, err := r.SetVersioned(ctx, market, q)
+	return err
+}
+func (r *RedisQuotes) SetVersioned(ctx context.Context, market string, q Quote) (bool, error) {
+	q.UpdatedAt = time.Now().UTC()
 	b, err := json.Marshal(q)
 	if err != nil {
-		return err
+		return false, err
 	}
-	return r.client.Set(ctx, "market:"+market+":quote", b, r.ttl).Err()
+	accepted, err := setQuote.Run(ctx, r.client, []string{"market:" + market + ":quote"}, b, fmt.Sprint(q.Sequence), r.ttl.Milliseconds()).Int()
+	return accepted == 1, err
 }
 func (r *RedisQuotes) Get(ctx context.Context, market string) (Quote, error) {
 	b, err := r.client.Get(ctx, "market:"+market+":quote").Bytes()
