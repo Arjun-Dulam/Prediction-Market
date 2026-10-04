@@ -304,6 +304,10 @@ func (s *Server) cancelOrderHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) refreshQuote(ctx context.Context, marketID, symbol string) {
+	start := time.Now()
+	if s.metrics != nil {
+		defer func() { s.metrics.Observe(trading.StageQuote, time.Since(start)) }()
+	}
 	if s.engine == nil {
 		return
 	}
