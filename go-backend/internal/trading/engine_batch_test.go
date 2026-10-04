@@ -201,3 +201,15 @@ func TestQuoteSnapshotAndPublisherObserveCommittedState(t *testing.T) {
 		t.Fatal("exposed uncertain engine state")
 	}
 }
+
+func TestQuantityMustFitEngineWireBeforeReservation(t *testing.T) {
+	s := batchService(t, &groupedEngine{})
+	for _, batchSize := range []int{1, 32} {
+		s.cfg.OrderBatchSize = batchSize
+		before := s.sequence
+		err := s.Place(context.Background(), Order{ID: "oversized", UserID: "yes", MarketID: "m", Side: BuyYes, Price: 50, Quantity: int(uint64(1) << 32)})
+		if err == nil || s.sequence != before || s.Balance("yes") != 1000 {
+			t.Fatalf("oversized quantity changed durable state: %v", err)
+		}
+	}
+}
