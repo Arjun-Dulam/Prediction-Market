@@ -44,7 +44,7 @@ benchmark-durable:
 	@go test ./internal/trading -run '^$$' -bench '^BenchmarkDurableOrderPlacement$$' -benchmem -benchtime=2s
 
 loadtest:
-	@go run ./cmd/loadtest -orders $${ORDERS:-1000} -concurrency $${CONCURRENCY:-16}
+	@go run ./cmd/loadtest -orders $${ORDERS:-5000} -concurrency $${CONCURRENCY:-32} -levels "$${LEVELS:-}" -repeats $${REPEATS:-3} -duration $${DURATION:-0s}
 # Integrations Tests for the application
 itest:
 	@echo "Running integration tests..."

@@ -1,0 +1,16 @@
+--- FAIL: TestTornTailCanBeFollowedByWritesAndAnotherRestart (0.02s)
+    --- FAIL: TestTornTailCanBeFollowedByWritesAndAnotherRestart/13 (0.01s)
+        recovery_test.go:54: corrupt WAL: invalid character '{' after object key:value pair
+    --- FAIL: TestTornTailCanBeFollowedByWritesAndAnotherRestart/76 (0.00s)
+        recovery_test.go:46: uncommitted tail applied: 199
+--- FAIL: TestWALBatchIsIndivisibleAtCrashBoundaries (0.01s)
+    recovery_test.go:86: transaction spans multiple independently replayable WAL records
+--- FAIL: TestProjectionFailureBlocksWritesAndCheckpointUntilRecovery (0.02s)
+    recovery_test.go:142: checkpoint discarded unprojected durable event
+--- FAIL: TestSnapshotAndWALReplayPreserveAdmissionOrder (0.04s)
+    recovery_test.go:271: stale engine ID collision: map[2:1 3:2]
+--- FAIL: TestExpiredPlacementDoesNotWriteWAL (0.01s)
+    recovery_test.go:413: err=<nil>
+FAIL
+FAIL	go-backend/internal/trading	0.313s
+FAIL
