@@ -54,10 +54,18 @@ func NewServer() *http.Server {
 	if err != nil {
 		panic(fmt.Sprintf("initialize authentication: %v", err))
 	}
+	batchSize := 32
+	if configured := os.Getenv("ORDER_BATCH_SIZE"); configured != "" {
+		value, err := strconv.Atoi(configured)
+		if err != nil || value < 1 || value > 32 {
+			panic("ORDER_BATCH_SIZE must be between 1 and 32")
+		}
+		batchSize = value
+	}
 	registry := metrics.New()
 	durable, err := trading.NewWithConfig(trading.Config{
 		WALPath: "data/orders.wal", SnapshotPath: "data/orderbook.snapshot",
-		Engine: engine.TradingAdapter{Client: matchingEngine}, Projector: projector, Sync: true, Observe: registry.Observe,
+		Engine: engine.TradingAdapter{Client: matchingEngine}, Projector: projector, Sync: true, Observe: registry.Observe, OrderBatchSize: batchSize,
 	})
 	if err != nil {
 		panic(fmt.Sprintf("initialize durable state: %v", err))

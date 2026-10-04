@@ -142,6 +142,9 @@ type Config struct {
 	Projector             Projector
 	Sync                  bool
 	Observe               func(Stage, time.Duration)
+	// OrderBatchSize coalesces already queued orders, without a batching timer.
+	// Values <=1 retain the single-order path. Maximum supported size is 32.
+	OrderBatchSize int
 }
 type Position struct {
 	Yes int `json:"yes"`
@@ -166,12 +169,20 @@ type Service struct {
 	positions    map[string]map[string]Position
 	sequence     uint64
 	failure      error
+	pendingMu    sync.Mutex
+	pending      []*placement
+	running      bool
+	closed       bool
+	workers      sync.WaitGroup
 }
 
 func New(wal string, engine Engine) (*Service, error) {
 	return NewWithConfig(Config{WALPath: wal, Engine: engine, Sync: true})
 }
 func NewWithConfig(cfg Config) (*Service, error) {
+	if cfg.OrderBatchSize < 0 || cfg.OrderBatchSize > 32 {
+		return nil, errors.New("order batch size must be between 0 and 32")
+	}
 	if cfg.WALPath == "" {
 		return nil, errors.New("WAL path is required")
 	}
@@ -461,6 +472,12 @@ func translate(side Side, price int) (int, string, error) {
 }
 func isBuy(side Side) bool { return side == BuyYes || side == BuyNo }
 func (s *Service) Place(ctx context.Context, o Order) error {
+	if s.cfg.OrderBatchSize > 1 {
+		return s.enqueue(ctx, o)
+	}
+	return s.placeSingle(ctx, o)
+}
+func (s *Service) placeSingle(ctx context.Context, o Order) error {
 	start := time.Now()
 	s.mu.Lock()
 	s.observe(StageLockWait, start)
@@ -471,34 +488,67 @@ func (s *Service) Place(ctx context.Context, o Order) error {
 	if s.failure != nil {
 		return s.failure
 	}
+	initial, err := s.prepareOrder(o)
+	if err != nil || len(initial) == 0 {
+		return err
+	}
+	o = initial[0].Order
+	m := s.markets[o.MarketID]
+	price, engineSide := o.EnginePrice, o.EngineSide
+	if err := s.commitMany(ctx, initial); err != nil {
+		return err
+	}
+	if s.cfg.Engine == nil {
+		o.Status = Open
+		return s.commit(ctx, Event{Type: EventOrder, Order: o})
+	}
+	start = time.Now()
+	result, err := s.cfg.Engine.AddOrder(ctx, m.Symbol, int32(price), uint32(o.Quantity), engineSide)
+	s.observe(StageEngine, start)
+	if err != nil {
+		// A transport error cannot prove whether the engine accepted the order.
+		// Keep its durable reservation and rebuild both services before retrying.
+		return s.fail(fmt.Errorf("matching engine: %w", err))
+	}
+
+	o.EngineID = result.OrderID
+	o.Status = Open
+	events := []Event{{Type: EventOrder, Order: o}}
+	events = append(events, s.buildTradeEvents(o.MarketID, result.Trades, map[uint32]string{o.EngineID: o.ID}, map[string]Order{o.ID: o})...)
+	return s.commitMany(ctx, events)
+}
+
+// prepareOrder only reads state. Batch callers separately track aggregate
+// reservations, so concurrent orders cannot collectively overdraw cash/shares.
+func (s *Service) prepareOrder(o Order) ([]Event, error) {
 	if o.ID == "" || o.UserID == "" || o.Quantity <= 0 {
-		return errors.New("id, user and positive quantity are required")
+		return nil, errors.New("id, user and positive quantity are required")
 	}
 	if existing, ok := s.orders[o.ID]; ok {
 		if existing.UserID == o.UserID && existing.MarketID == o.MarketID && existing.Side == o.Side && existing.Price == o.Price && existing.Quantity == o.Quantity {
-			return nil
+			return nil, nil
 		}
-		return errors.New("order id already exists with different parameters")
+		return nil, errors.New("order id already exists with different parameters")
 	}
 	m, ok := s.markets[o.MarketID]
 	if !ok || m.Status != Open {
-		return errors.New("market is not open")
+		return nil, errors.New("market is not open")
 	}
 	price, engineSide, err := translate(o.Side, o.Price)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	cost := int64(o.Price * o.Quantity)
 	if isBuy(o.Side) && s.balances[o.UserID] < cost {
-		return errors.New("insufficient balance")
+		return nil, errors.New("insufficient balance")
 	}
 	if !isBuy(o.Side) {
 		pos := s.positions[o.UserID][o.MarketID]
 		if o.Side == SellYes && pos.Yes < o.Quantity {
-			return errors.New("insufficient YES shares")
+			return nil, errors.New("insufficient YES shares")
 		}
 		if o.Side == SellNo && pos.No < o.Quantity {
-			return errors.New("insufficient NO shares")
+			return nil, errors.New("insufficient NO shares")
 		}
 	}
 	o.EnginePrice, o.EngineSide, o.Status, o.Sequence = price, engineSide, Pending, s.sequence+1
@@ -516,42 +566,7 @@ func (s *Service) Place(ctx context.Context, o Order) error {
 		}
 		initial = append(initial, Event{Type: EventPosition, UserID: o.UserID, MarketID: o.MarketID, YesDelta: yesDelta, NoDelta: noDelta})
 	}
-	if err := s.commitMany(ctx, initial); err != nil {
-		return err
-	}
-	if s.cfg.Engine == nil {
-		o.Status = Open
-		return s.commit(ctx, Event{Type: EventOrder, Order: o})
-	}
-	start = time.Now()
-	result, err := s.cfg.Engine.AddOrder(ctx, m.Symbol, int32(price), uint32(o.Quantity), engineSide)
-	s.observe(StageEngine, start)
-	if err != nil {
-		o.Status = Cancelled
-		refund := int64(0)
-		if isBuy(o.Side) {
-			refund = cost
-		}
-		rollback := []Event{{Type: EventOrder, Order: o, UserID: o.UserID, Amount: refund}}
-		if !isBuy(o.Side) {
-			yesDelta, noDelta := 0, 0
-			if o.Side == SellYes {
-				yesDelta = o.Quantity
-			} else {
-				noDelta = o.Quantity
-			}
-			rollback = append(rollback, Event{Type: EventPosition, UserID: o.UserID, MarketID: o.MarketID, YesDelta: yesDelta, NoDelta: noDelta})
-		}
-		if rollbackErr := s.commitMany(ctx, rollback); rollbackErr != nil {
-			return fmt.Errorf("matching engine: %w; durable rollback: %v", err, rollbackErr)
-		}
-		return err
-	}
-	o.EngineID = result.OrderID
-	o.Status = Open
-	events := []Event{{Type: EventOrder, Order: o}}
-	events = append(events, s.buildTradeEvents(o.MarketID, result.Trades, map[uint32]string{o.EngineID: o.ID}, map[string]Order{o.ID: o})...)
-	return s.commitMany(ctx, events)
+	return initial, nil
 }
 func (s *Service) applyTrades(ctx context.Context, marketID string, trades []EngineTrade) error {
 	events := s.buildTradeEvents(marketID, trades, nil, nil)
@@ -900,6 +915,10 @@ func (s *Service) loadSnapshot() error {
 	return nil
 }
 func (s *Service) Close() error {
+	s.pendingMu.Lock()
+	s.closed = true
+	s.pendingMu.Unlock()
+	s.workers.Wait()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.walFile != nil {
