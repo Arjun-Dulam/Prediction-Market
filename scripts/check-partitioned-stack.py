@@ -52,6 +52,7 @@ def balances():
     return [http('GET', '/api/v1/balances/' + u['user_id'], u['token'])['cents'] for u in users]
 makers = [order(m, 'maker', 'buy_yes', 60, 2) for m in range(2)]
 for o in makers: place(o)
+local_ids = [get_order(o)['engine_id'] for o in makers]
 for m in range(2): place(order(m, 'taker', 'buy_no', 40, 1), 1)
 assert balances() == [760, 920], balances()
 for m in range(2):
@@ -109,6 +110,7 @@ for m in range(2):
     quote = http('GET', '/api/v1/markets/' + symbols[m] + '/quote')
     assert quote['bid'] == -1 and quote['ask'] == -1, quote
 print(json.dumps({'engine_instances': 2, 'distinct_owners': [owner(s) for s in symbols],
+    'maker_engine_ids': local_ids, 'numeric_ids_overlap': local_ids[0] == local_ids[1],
     'shared_wallet_no_overdraw': True, 'parallel_retries': 32,
     'two_owner_SIGKILL_recovery': True, 'single_owner_failure_freezes_ledger': True,
     'uncertain_reservation_recovered_once': True, 'post_recovery_cancel_refunds': True,
