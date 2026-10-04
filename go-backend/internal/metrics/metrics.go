@@ -11,12 +11,13 @@ import (
 
 type stageSummary struct{ count, duration atomic.Uint64 }
 type Registry struct {
-	stages    [trading.StageCount]stageSummary
-	requests  atomic.Uint64
-	errors    atomic.Uint64
-	duration  atomic.Uint64
-	orders    atomic.Uint64
-	snapshots atomic.Uint64
+	stages           [trading.StageCount]stageSummary
+	snapshotPauseMax atomic.Uint64
+	requests         atomic.Uint64
+	errors           atomic.Uint64
+	duration         atomic.Uint64
+	orders           atomic.Uint64
+	snapshots        atomic.Uint64
 }
 
 func New() *Registry { return &Registry{} }
@@ -41,6 +42,13 @@ func (m *Registry) Middleware(next http.Handler) http.Handler {
 func (m *Registry) Observe(stage trading.Stage, duration time.Duration) {
 	m.stages[stage].count.Add(1)
 	m.stages[stage].duration.Add(uint64(duration))
+	if stage == trading.StageSnapshotPause {
+		for old := m.snapshotPauseMax.Load(); uint64(duration) > old; old = m.snapshotPauseMax.Load() {
+			if m.snapshotPauseMax.CompareAndSwap(old, uint64(duration)) {
+				break
+			}
+		}
+	}
 }
 func (m *Registry) OrderAccepted() { m.orders.Add(1) }
 func (m *Registry) Snapshot()      { m.snapshots.Add(1) }
@@ -57,6 +65,7 @@ func (m *Registry) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 		summary := &m.stages[stage]
 		_, _ = fmt.Fprintf(w, "exchange_stage_duration_seconds_count{stage=%q} %d\nexchange_stage_duration_seconds_sum{stage=%q} %.9f\n", stage.String(), summary.count.Load(), stage.String(), float64(summary.duration.Load())/float64(time.Second))
 	}
+	_, _ = fmt.Fprintf(w, "# TYPE exchange_snapshot_pause_max_seconds gauge\nexchange_snapshot_pause_max_seconds %.9f\n", float64(m.snapshotPauseMax.Load())/float64(time.Second))
 	requests := m.requests.Load()
 	seconds := float64(m.duration.Load()) / float64(time.Second)
 	_, _ = fmt.Fprintf(w, "# TYPE exchange_http_requests_total counter\nexchange_http_requests_total %d\n", requests)
