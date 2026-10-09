@@ -1,12 +1,9 @@
 # Backend and recovery audit — October 3, 2026
 
-**Follow-up:** [Durable order-path optimization](performance-optimization.md)
-records the later measured performance improvements. The tables below preserve
-the earlier audit results.
-
-This is an undergraduate exchange systems project. The improvements emphasize
-observable correctness and honest measurement; they do not establish production
-readiness or real-world capacity.
+This report records the initial recovery audit and local benchmarks. The tables
+describe the code at that point. Later changes are in the
+[persistence report](performance-optimization.md) and
+[RPC report](local-market-partitions.md).
 
 ## Architecture and audit scope
 
@@ -95,8 +92,8 @@ Go integration tests require Docker; they fail when Docker is unavailable rather
 than silently skipping. C++ tests compile with ASan/UBSan even in the Release
 build. On this host a stale Homebrew cache prevented the original build directory from configuring; the fresh
 `build-audit` directory worked. CMake needs a C++20 compiler, OpenSSL, gRPC,
-Protobuf and abseil; Google Test/Benchmark are fetched at pinned tags. See the
-existing CI workflow for Ubuntu packages.
+Protobuf and abseil; Google Test/Benchmark are fetched at pinned tags.
+See `engine/Dockerfile` for Ubuntu build dependencies.
 
 ## Reproduce authenticated measurements
 
@@ -281,14 +278,3 @@ microbenchmark times should not be presented as causal improvements.
   payment custody, administrator/oracle authorization, shared-host isolation or
   real-money operation is claimed. Numeric boundary hardening and broader
   cancellation/settlement fault injection are useful next correctness work.
-
-## Verified resume bullet options
-
-- Built a Go/C++ prediction exchange with JWT authentication, gRPC matching and
-  fsynced WAL/PostgreSQL accounting; validated 60,000 orders across four client
-  concurrency levels and a 58,832-order, two-minute soak at 490 orders/s with
-  zero errors and verified cash/share balances on an Apple M3 via Docker.
-- Strengthened exchange recovery with atomic WAL batch framing, torn-tail repair
-  and fail-closed persistence handling; validated 64 concurrent idempotent retries
-  and real API/engine SIGKILL recovery preserving cash, shares and price-time
-  priority, plus Go race detection and 56 C++ ASan/UBSan tests.

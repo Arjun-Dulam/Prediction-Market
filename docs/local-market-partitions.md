@@ -1,10 +1,9 @@
 # Batched RPCs and local market owners
 
-This follow-up to [the durable-persistence report](performance-optimization.md)
-adds three bounded changes: ordered engine RPC batches, versioned quote
-publication, and an experimental two-engine Docker deployment. It retains one
-Go ledger, state lock, admission worker, WAL and PostgreSQL projector. This is
-not horizontal scaling of the accounting service or an availability cluster.
+Ordered engine RPC batches and versioned quote publication follow the
+[persistence changes](performance-optimization.md). The optional two-engine
+Docker setup assigns markets to separate owners. Admission, wallet reservations,
+WAL writes, and SQL projection still run through one Go ledger.
 
 ## Behavior and ownership
 
@@ -13,7 +12,7 @@ one ordered engine RPC per involved owner. The C++ batch validates all commands
 before mutation, executes them in request order, and returns individual fills and
 one final bid/ask per affected symbol. Other public engine operations cannot
 interleave the batch. Completion events are fsynced and synchronously committed
-to PostgreSQL before replies. No durability setting was relaxed.
+to PostgreSQL before replies. WAL fsync and synchronous SQL commits remain enabled.
 
 Quotes are derived from committed results. Publication happens outside the state
 lock, once per affected market/group, before the worker sends successful replies.
@@ -33,9 +32,9 @@ and bounded here; there is no separate event-streaming service, durable fan-out
 or fixed-rate delivery guarantee. Inactive quotes may require snapshot reads.
 
 `ENGINE_ADDRS` assigns symbols by stable FNV-1a hash modulo the number of
-configured endpoints. Support is deliberately limited to one or two distinct
-endpoints. Their order is configuration. A group spanning both owners issues
-its two RPCs concurrently and reassembles results in original admission order.
+configured endpoints. The router accepts one or two distinct endpoints; endpoint
+order is configuration. A group spanning both owners issues its two RPCs
+concurrently and reassembles results in original admission order.
 A market's YES/NO activity stays on the same engine. The Go ledger globally
 coordinates cash/share reservations; two market owners cannot independently
 spend the same wallet. Markets must have unique engine symbols.
@@ -267,7 +266,7 @@ cd go-backend
 docker compose -p pme-audit -f docker-compose.yml -f docker-compose.partitioned.yml down
 ```
 
-## Correctness and complexity review
+## Correctness checks
 
 Final Go suite/race/vet outputs are in `results/rpc-final-code-go-*.txt`; native C++
 ASan/UBSan output is `results/rpc-final-cpp-sanitizers.txt`. Reproduce checks as in the
@@ -290,26 +289,7 @@ PATH="$(go env GOPATH)/bin:$PATH" protoc -I proto --go_out=go-backend \
   --go-grpc_opt=module=go-backend proto/exchange.proto
 ```
 
-No additional Go pool, journal format, deployment service or distributed
-transaction protocol was added. The router supports only two owners, uses
-bounded groups and at most two concurrent RPCs, and has no dynamic assignment or
-rebalancing. Most extra code is generated bindings or targeted tests. The
-single-order and single-owner paths remain controls. The Go ledger/state lock,
-PostgreSQL commits, retained history and checkpoint copies remain scaling limits;
-replicating those requires a separate correctness design and fresh measurements.
-
-Verified resume option 1: improved a durable Go/C++ exchange's authenticated
-throughput **33% (2,879 to 3,817 orders/s)** and reduced p99 **44%** at 64 clients
-using ordered gRPC batches and versioned quote coalescing; validated three
-repeated synthetic 5,000-order trials per concurrency level while retaining WAL
-fsync, synchronous accounting and deterministic recovery.
-
-Verified resume option 2: implemented static market ownership across two C++
-matching engines behind a Go ledger; validated shared-wallet reservations,
-32 concurrent idempotent retries, overlapping engine IDs and SIGKILL recovery,
-plus a two-minute 322,448-order synthetic soak with zero errors and exact
-accounting. This describes partitioned matching, not a replicated ledger or a
-measured horizontal throughput gain.
-
-For books, papers and exercises that explain these choices, see the
-[study guide](interview-study-guide.md).
+The router uses at most two concurrent RPCs. Assignment is static; there is no
+rebalancing or automatic failover. Single-order and single-owner modes remain
+benchmark controls. The ledger lock, SQL commits, retained history, and checkpoint
+copies still limit scaling.

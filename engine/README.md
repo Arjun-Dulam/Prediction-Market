@@ -1,206 +1,61 @@
-# Prediction Market Exchange Engine
+# C++ matching engine
 
-[![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://isocpp.org/)
-[![CMake](https://img.shields.io/badge/CMake-3.21+-green.svg)](https://cmake.org/)
+The engine matches orders by price, then insertion order within a price level.
+Each prediction market uses one book; the Go API translates complementary YES/NO
+orders into engine-side buys and sells.
 
-A C++20 price-time-priority matching engine for the Prediction Market Exchange.
-See [the systems audit](../docs/systems-audit.md) for repeated, hardware-qualified
-measurements and a clear distinction between in-process matching and HTTP orders.
+## Book storage and locking
 
----
+- `std::map<price, std::vector<Order>>` holds each side of the book. Matching
+  walks highest bids or lowest asks first, then each level in FIFO order.
+- `std::unordered_map<order_id, OrderLocation>` indexes cancellation by side,
+  price, and vector position. Lookup is average O(1).
+- Filled and cancelled orders are marked for deletion. Compaction removes them,
+  repairs lookup positions, and drops empty price levels.
+- A mutex protects each book. The exchange's shared mutex protects symbol
+  lookup; batch submissions take its exclusive lock to prevent interleaving.
 
-## Table of Contents
+`AddOrders` accepts 1–32 commands. It validates the group before mutation and
+returns per-order fills plus a final quote for each affected symbol. `GetQuote`
+reads bid and ask from the same book state.
 
-- [Architecture](#architecture)
-- [Performance](#performance)
-- [Building & Running](#building--running)
-- [Project Structure](#project-structure)
-- [Future Work](#future-work)
-- [Technologies Used](#technologies-used)
-- [Contact Me](#contact-me)
+The engine holds books in memory. Recovery is coordinated by the Go service,
+which rebuilds open orders from its WAL and snapshot. Restart all engine owners
+with the API after an uncertain RPC result.
 
----
+## Build and test
 
-## Architecture
-
-### Data Structure Design
-
-The orderbook uses a three-tier indexing strategy optimized for different access patterns:
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                          OrderBook                               │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│   bids: std::map<price, std::vector<Order>>                      │
-│         └── Sorted high→low, FIFO within each price level        │
-│                                                                  │
-│   asks: std::map<price, std::vector<Order>>                      │
-│         └── Sorted low→high, FIFO within each price level        │
-│                                                                  │
-│   order_lookup: std::unordered_map<order_id, OrderLocation>      │
-│                 └── O(1) lookup for cancellations                │
-│                                                                  │
-└──────────────────────────────────────────────────────────────────┘
-```
-
-### Matching Algorithm
-
-The engine implements **price-time priority** (standard FIFO matching):
-
-```cpp
-// Simplified matching flow
-while (incoming_order.quantity > 0) {
-    // 1. Find best counter-side price
-    auto best_price = (is_buy) ? asks.begin() : prev(bids.end());
-
-    // 2. Check price compatibility
-    if (!prices_compatible(incoming_order.price, best_price)) break;
-
-    // 3. Match against orders at this level (FIFO)
-    for (auto& resting_order : orders_at_price) {
-        if (resting_order.deleted) continue;
-
-        uint32_t fill_qty = min(incoming.qty, resting.qty);
-        execute_trade(incoming, resting, fill_qty);
-
-        if (resting.qty == 0) mark_deleted(resting);
-    }
-
-    // 4. Clean up empty price levels
-    if (level_empty) erase_price_level(best_price);
-}
-```
-
-### Lazy Deletion & Compaction
-
-Rather than immediately removing filled/cancelled orders (expensive vector reorganization), orders are marked `deleted_or_filled` and cleaned up in batches:
-
-```cpp
-#define COMPACTION_RATIO 0.75  // Trigger when 75% of orders are deleted
-
-void compact_orderbook() {
-    // Uses std::remove_if to batch-remove deleted orders
-    // Updates order_lookup indices after shifts
-    // Erases empty price levels from maps
-}
-```
-
-This trades memory for latency—deleted orders occupy space temporarily but avoid per-deletion overhead on the hot path.
-
----
-
-## Performance
-
-### Historical Benchmark Results (unverified reference)
-
-| Metric | Value            |
-|--------|------------------|
-| **Throughput (with matching)** | 2.78M orders/sec |
-| **P50 Latency** | 303 ns           |
-| **P99 Latency** | 1.14 µs          | 
-
-### Benchmark Suite
-
-Five benchmarks measure different aspects of performance:
-
-1. **BM_AddOrder_No_Match** — Insertion throughput without matching
-2. **BM_AddOrder_Latency** — Per-order latency distribution
-3. **BM_RemoveOrder_VaryDepth** — Cancellation performance at various depths
-4. **BM_MatchingPerformance** — Synthetic generated-stream matching throughput
-5. **BM_MatchingLatency** — Per-match latency distribution
-
----
-
-## Building & Running
-
-### Requirements
-
-- C++20 compiler
-- CMake 3.21+
-
-### Build
+Requires a C++20 compiler, CMake 3.21+, gRPC, Protobuf, OpenSSL, and Abseil.
+CMake fetches pinned Google Test and Google Benchmark versions. The
+[Dockerfile](Dockerfile) lists Ubuntu build dependencies.
 
 From the repository root:
 
 ```bash
-cmake -S . -B build
-cmake --build build
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j4
+ctest --test-dir build/engine --output-on-failure
 ```
 
-### Run Benchmarks
+The test target uses ASan and UBSan. Tests cover price-time priority, partial
+fills, cancellation, compaction, multiple books, and batch validation.
+
+## Benchmarks
 
 ```bash
-./build/engine/OrderBookBenchmark
+build/engine/OrderBookBenchmark
 ```
 
-Example output:
-```
------------------------------------------------------------------------------------------
-Benchmark                       Time             CPU   Iterations   UserCounters
------------------------------------------------------------------------------------------
-BM_AddOrder_No_Match/0       294 ns          294 ns      2384021    items_per_second=3.676767M/s
-BM_AddOrder_No_Match/1000    301 ns          301 ns      2325581    items_per_second=3.676767M/s
-           |                    |               |           |                        |                   
-           |                    |               |           |                        |                   
-           |                    |               |           |                        |                   
-```
+The suite measures insertion, cancellation at different depths, and matching
+throughput/latency. These run inside the C++ process and exclude HTTP, auth,
+gRPC transport, WAL fsync, SQL, and quote publication. See the
+[benchmark records](../docs/systems-audit.md) for measured results and hardware.
 
-### Run Unit Tests
+## Files
 
-```bash
-./build/engine/OrderBookTests
-```
+- `include/`, `src/`: book storage, exchange wrapper, and gRPC server.
+- `tests/test.cpp`: Google Test cases.
+- `benchmarks/`: Google Benchmark workloads and analysis scripts.
+- [`../proto/exchange.proto`](../proto/exchange.proto): RPC definitions.
 
-56 unit tests covering:
-- Order/Trade construction
-- Matching engine (partial fills, price-time priority, multi-level matching)
-- Order removal and lookup consistency
-- Compaction correctness
-- Edge cases (negative prices, large quantities, high volume)
-
----
-
-## Project Structure
-
-```
-engine/
-├── include/
-│   ├── order.hpp           # Order, Trade classes, Side enum
-│   └── orderbook.hpp       # OrderBook interface
-├── src/
-│   ├── order.cpp           # Utility functions
-│   └── orderbook.cpp       # Matching engine implementation
-├── benchmarks/
-│   ├── orderbook_bench.cpp # Google Benchmark suite
-│   └── order_generator.*   # Realistic order generation
-├── tests/
-│   └── test.cpp            # Google Test suite
-├── benchmarks/
-│   ├── scripts/            # Benchmark analysis tools
-│   └── results/            # Generated benchmark output
-└── CMakeLists.txt          # Build configuration
-```
-
----
-
-## Future Work
-
-- **Multithreading** — Synchronize across multiple orderbooks for different symbols.
-- **Memory Pooling** — Custom allocators to reduce allocation overhead and improve cache behavior
-- **Advanced Order Types** — Market Orders, Stop-Loss/Stop-Limit
-- **Failure semantics** — Deduplication for ambiguous gRPC outcomes; the existing server already accepts orders over gRPC.
-
----
-
-## Technologies Used
-
-Built with:
-- [Google Benchmark](https://github.com/google/benchmark) — Microbenchmarking framework
-- [Google Test](https://github.com/google/googletest) — Unit testing framework
-
-## Contact Me
-
-Have any suggestions, critiques, or improvements? Please reach out!
-
-Email: [adulam3@gatech.edu](mailto:adulam3@gatech.edu) 
+Contact: [adulam3@gatech.edu](mailto:adulam3@gatech.edu)

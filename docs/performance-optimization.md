@@ -1,9 +1,8 @@
 # Durable order-path optimization
 
-This follow-up to [the systems audit](systems-audit.md) improves authenticated
-order placement through measurement and three focused persistence optimizations.
-The C++ matcher is unchanged. No new services or deployment infrastructure were
-added. These are synthetic local measurements, not production capacity claims.
+This report covers PostgreSQL batching, group commit, and checkpoint changes
+following the [recovery audit](systems-audit.md). Measurements use the local
+authenticated load client. The C++ matcher was unchanged for these comparisons.
 
 ## Architecture and measured bottleneck
 
@@ -24,7 +23,7 @@ median per-run average costs were 0.746 ms/order in projection, 0.454 ms/order i
 WAL write/flush and 0.060 ms/order in matching RPCs, with 40.692 ms/order waiting
 for the lock. Matching CPU was not the useful first optimization target.
 
-## Measurement and three focused changes
+## Changes and instrumentation
 
 Fixed-label counters/sums expose admission waiting, WAL, projection, engine,
 quote and checkpoint pause time. A maximum-pause gauge records the longest
@@ -344,15 +343,3 @@ Use the client's existing `-base` flag against the API. Independent clients need
 independent fixture IDs and separately reported results; do not add percentiles
 from different clients together. Multiple API replicas are premature while each
 API owns authoritative state and a local WAL. No VMs were provisioned by this work.
-
-## Verified resume options
-
-- Improved a Go/C++ exchange's authenticated order throughput **3.3× (807 →
-  2,678 orders/s)** and reduced p99 **49%** at 64 clients using bounded group
-  commit and pipelined PostgreSQL projection; validated three repeated synthetic
-  5,000-order trials while retaining fsync and synchronous accounting.
-- Implemented crash-safe WAL rotation and off-lock checkpoints for a Go/C++
-  prediction exchange; validated **210,636 authenticated orders over two minutes**
-  on a data set starting with **591,899 orders**, with zero HTTP errors and exact
-  balances/positions, plus SIGKILL replay tests, Go race detection and C++ sanitizers.
-

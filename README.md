@@ -1,46 +1,78 @@
 # Prediction Market Exchange
 
-A durable binary-outcome exchange with a Go REST/WebSocket backend, C++
-price-time-priority matching engine over gRPC, PostgreSQL projections, Redis
-quote caching, deterministic recovery, and a reproducible Docker stack.
+Binary prediction-market exchange with a Go API and a C++ price-time-priority
+matching engine. Orders cross a gRPC boundary; the API owns authentication,
+cash/share reservations, accounting, and recovery.
 
-See [go-backend/README.md](go-backend/README.md) for API examples, architecture,
-deployment instructions, and measured performance.
-
-## Systems audit and verified performance
-
-See [the performance report](docs/performance-optimization.md) for the measured
-807 → 2,678 authenticated orders/s improvement at 64 clients (3.3×), with fsync
-and synchronous PostgreSQL accounting retained. It includes repeated concurrency
-sweeps, raw results, setup, limitations and verified resume bullets.
-
-See [docs/systems-audit.md](docs/systems-audit.md) for the architecture audit,
-WAL crash-recovery fixes, authenticated concurrency sweeps, two-minute soak,
-raw results, reproduction commands and verified resume bullet options.
-
-The [local market-owner experiment](docs/local-market-partitions.md) adds batched
-engine RPCs, versioned quotes and an optional two-engine Docker deployment.
-The [interview study guide](docs/interview-study-guide.md) connects the code to
-books, papers and hands-on exercises.
-
-The load test checks accounting as well as HTTP success. Performance numbers
-are synthetic local measurements with hardware and variability recorded.
-
-## How to Compile?
-
-From the repository root:
-
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-```
-
-```bash
-cmake --build build
-```
-
-Or start the complete product:
+## Run locally
 
 ```bash
 cd go-backend
-docker compose up -d --build
+cp .env.example .env
+# Set JWT_SECRET in .env before starting.
+docker compose up -d --build --wait
+curl http://localhost:8080/health
+```
+
+The stack includes the API on port 8080, the engine on 50051, PostgreSQL, and
+Redis. The deposit endpoint creates test funds. Market creators choose the
+settlement outcome; there is no payment integration or external outcome oracle.
+
+[Backend setup and API](go-backend/README.md) · [C++ engine](engine/README.md)
+
+## Order path
+
+1. Authenticate the request and validate its idempotency key.
+2. Reserve cash or shares, fsync the WAL, and commit the PostgreSQL projection.
+3. Submit an ordered batch to the C++ engine.
+4. Persist fills and accounting changes.
+5. Publish versioned quotes to Redis/WebSocket subscribers and acknowledge the order.
+
+One Go ledger serializes admission across markets. Snapshots and WAL replay
+rebuild accounts and open books. An uncertain engine or persistence result stops
+new writes; recovery requires restarting the API and all engine owners together.
+
+## Measurements
+
+Local authenticated HTTP workload on an Apple M3, with 64 concurrent clients,
+three 5,000-order trials per build, WAL fsync, and synchronous SQL accounting:
+
+| Build | Orders/sec | p50 | p95 | p99 | Errors |
+|---|---:|---:|---:|---:|---:|
+| Before RPC batching | 2,879.4 | 21.44 ms | 37.00 ms | 44.87 ms | 0 |
+| After RPC batching | 3,816.5 | 16.38 ms | 18.11 ms | 25.27 ms | 0 |
+
+Values are medians across runs. Each run checks final balances and positions.
+The two-engine, eight-market soak completed 322,448 orders in 120 seconds with
+zero errors. A second engine did not improve throughput in this workload;
+SQL projection remains the largest measured serialized stage.
+
+The client is closed-loop and runs on the same host as Docker. The measurements
+exclude setup and include no connected WebSocket subscribers.
+
+- [RPC batching and market ownership](docs/local-market-partitions.md): latest
+  measurements, raw results, configuration, and reproduction commands.
+- [Persistence and checkpoints](docs/performance-optimization.md): group commit,
+  PostgreSQL batching, and WAL rotation.
+- [Recovery audit](docs/systems-audit.md): earlier regressions and crash tests.
+- [Reading notes](docs/reading-notes.md): references and exercises.
+
+## Tests and load client
+
+```bash
+cd go-backend
+go test -count=1 ./...
+go test -race -count=1 ./...
+go vet ./...
+go build -o /tmp/pme-loadtest ./cmd/loadtest
+/tmp/pme-loadtest -orders 5000 -levels 1,8,32,64 -repeats 3
+```
+
+Go integration tests require Docker. Run native C++ tests from the repository
+root; the test target includes ASan and UBSan:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target OrderBookTests -j4
+ctest --test-dir build/engine --output-on-failure
 ```

@@ -1,8 +1,8 @@
 # Prediction Market Exchange
 
-A runnable binary-outcome exchange composed of an authenticated Go REST/WebSocket service, a
-C++ price-time-priority matching engine over gRPC, PostgreSQL materialized
-state, Redis quote caching, and a durable local write-ahead log.
+Go REST/WebSocket API for the exchange. It owns users, markets, cash/share
+reservations, accounting, and the WAL. Matching runs in C++ over gRPC; PostgreSQL
+stores projected state and Redis caches quotes.
 
 ## Architecture
 
@@ -38,8 +38,8 @@ event IDs, making WAL replay idempotent even when local sequence numbers restart
 
 ## Run the complete stack
 
-Create `go-backend/.env` with the database variables shown below, then start all
-four containers:
+Run these commands from `go-backend/`. Copy `.env.example` to `.env` and set
+`JWT_SECRET`. The database settings are:
 
 ```dotenv
 BLUEPRINT_DB_HOST=localhost
@@ -98,7 +98,7 @@ Example:
 }
 ```
 
-## Verification and performance
+## Tests and benchmarks
 
 ```bash
 go test -count=1 ./...
@@ -120,18 +120,15 @@ outside the measured interval. WebSocket publication is included without subscri
 Use `-environment` to describe the host and server configuration and `-label` to
 identify the build. Exit status is nonzero for order or accounting failures.
 
-See [the performance report](../docs/performance-optimization.md) for the
-verified **807 → 2,678 authenticated orders/s** improvement at 64 clients,
-p50/p95/p99, raw data and reproduction commands. The
-[systems audit](../docs/systems-audit.md) preserves earlier results and recovery work.
-The [RPC and local-partition report](../docs/local-market-partitions.md) records
-newer repeated measurements and an optional two-engine Docker experiment.
-Use `-markets 8 -accounts shared` or `-accounts independent` to measure many books
-with shared or separate wallet pairs. One Go ledger remains authoritative.
-See the [study guide](../docs/interview-study-guide.md) for related reading/exercises.
+The [RPC benchmark report](../docs/local-market-partitions.md) records the latest
+measurements: 2,879.4 to 3,816.5 orders/s at 64 clients, with p99 falling from
+44.87 to 25.27 ms. Results are medians of three local 5,000-order trials.
+The [persistence report](../docs/performance-optimization.md) and
+[recovery audit](../docs/systems-audit.md) cover earlier changes and measurements.
 
-Historical claims of 595 HTTP orders/sec and 3.73M in-process C++ orders/sec
-should be reproduced before use; they are not guaranteed current results.
+Use `-markets 8 -accounts shared` or `-accounts independent` to spread orders
+across books with shared or separate wallet pairs. One Go ledger owns all
+reservations. Reference material is in [reading notes](../docs/reading-notes.md).
 
 New WAL writes frame complete business event batches in a single versioned record.
 Replay discards and truncates an incomplete trailing record and rejects complete
@@ -142,15 +139,14 @@ after a durable checkpoint. This prevents retries or snapshots from
 compounding uncertain state. Keep PostgreSQL and API volumes together: snapshots
 alone cannot recreate a lost PostgreSQL database after WAL truncation.
 
-The checked-in [OpenAPI contract](openapi.yaml) documents the public surface,
-and GitHub Actions runs Go race/static/integration checks, sanitizer-backed C++
-tests, and production container builds.
+The [OpenAPI contract](openapi.yaml) documents the HTTP API. Test and build checks
+run locally using the commands above and the C++ commands in the root README.
 
-This is an exchange systems project, not a real-money service. External payment
-custody, administrator roles, outcome-oracle verification, and regulatory controls
-are deliberately outside its scope; do not expose the demo funding endpoint publicly.
+Deposits create test funds, and market creators choose settlement outcomes.
+Payment custody and external outcome verification are not implemented. Keep the
+funding endpoint private.
 
-## Local engine-owner experiment
+## Two local engine owners
 
 The default deployment uses one engine. `ENGINE_RPC_BATCH=true` (default) sends
 ordered groups of up to 32 commands; `false` keeps individual calls as a control.
