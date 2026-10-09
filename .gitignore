@@ -22,3 +22,6 @@ engine/cmake-build-debug/
 engine/cmake-build-release/
 cmake-build-debug/
 cmake-build-release/
+
+# Generated compiler database
+compile_commands.json
